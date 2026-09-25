@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html lang="pt">
+<head>
+<meta charset="utf-8">
+<title>Casas para Arrendar</title>
+<style>
+  * { box-sizing: border-box; }
+  body { font-family: system-ui, sans-serif; margin: 0; background: #f5f5f5; color: #222; }
+  header { background: #1a73e8; color: white; padding: 16px 24px; display: flex; justify-content: space-between; align-items: center; gap: 16px; }
+  h1 { margin: 0; font-size: 20px; }
+  button { background: #34a853; color: white; border: none; padding: 10px 18px; border-radius: 4px; cursor: pointer; font-size: 14px; }
+  button:hover { background: #2d8e47; }
+  button:disabled { background: #999; cursor: wait; }
+  .progress { display: none; flex: 1; max-width: 400px; }
+  .progress.active { display: block; }
+  .bar { background: rgba(255,255,255,0.3); height: 8px; border-radius: 4px; overflow: hidden; margin-top: 6px; }
+  .bar-fill { background: white; height: 100%; width: 0%; transition: width 0.2s; }
+  .progress-label { font-size: 12px; }
+  .filters { padding: 16px 24px; background: white; border-bottom: 1px solid #ddd; display: flex; gap: 12px; flex-wrap: wrap; }
+  .filters input, .filters select { padding: 8px; border: 1px solid #ccc; border-radius: 4px; font-size: 14px; }
+  .filters input[type="text"] { flex: 1; min-width: 200px; }
+  .stats { padding: 8px 24px; color: #666; font-size: 13px; }
+  table { width: 100%; border-collapse: collapse; background: white; }
+  th, td { padding: 10px 12px; text-align: left; border-bottom: 1px solid #eee; font-size: 13px; vertical-align: top; }
+  th { background: #fafafa; font-weight: 600; position: sticky; top: 0; }
+  tr:hover { background: #f9f9f9; }
+  .title { font-weight: 600; max-width: 400px; }
+  .price { color: #1a73e8; font-weight: 600; white-space: nowrap; }
+  .tag { display: inline-block; padding: 2px 8px; border-radius: 3px; background: #e8f0fe; color: #1a73e8; font-size: 12px; }
+  .empty { padding: 40px; text-align: center; color: #999; }
+  details { cursor: pointer; }
+  details summary { color: #666; font-size: 12px; }
+  details pre { white-space: pre-wrap; font-size: 12px; background: #f5f5f5; padding: 8px; border-radius: 4px; max-height: 200px; overflow: auto; }
+</style>
+</head>
+<body>
+<header>
+  <h1>🏠 Casas para Arrendar</h1>
+  <div class="progress" id="progress">
+    <div class="progress-label" id="progressLabel">Starting…</div>
+    <div class="bar"><div class="bar-fill" id="barFill"></div></div>
+  </div>
+  <button id="refreshBtn" onclick="refresh()">Refresh from WhatsApp</button>
+</header>
+
+<div class="filters">
+  <input type="text" id="q" placeholder="Search title or text..." oninput="debounceLoad()">
+  <select id="typology" onchange="load()">
+    <option value="">All typologies</option>
+    <option>T0</option><option>T1</option><option>T2</option>
+    <option>T3</option><option>T4</option><option>T5</option>
+    <option>V2</option><option>V3</option><option>V4</option><option>V5</option>
+    <option>APARTAMENTO</option><option>VIVENDA</option><option>MORADIA</option>
+    <option>QUARTO</option><option>DUPLEX</option>
+  </select>
+  <input type="number" id="minPrice" placeholder="Min Kz" oninput="debounceLoad()" style="width:120px">
+  <input type="number" id="maxPrice" placeholder="Max Kz" oninput="debounceLoad()" style="width:120px">
+</div>
+
+<div class="stats" id="stats"></div>
+<div id="content"><div class="empty">Click "Refresh from WhatsApp" to load listings</div></div>
+
+<script>
+let timer;
+function debounceLoad() { clearTimeout(timer); timer = setTimeout(load, 300); }
+
+async function load() {
+  const params = new URLSearchParams();
+  const q = document.getElementById('q').value;
+  const t = document.getElementById('typology').value;
+  const mn = document.getElementById('minPrice').value;
+  const mx = document.getElementById('maxPrice').value;
+  if (q) params.set('q', q);
+  if (t) params.set('typology', t);
+  if (mn) params.set('min_price', mn);
+  if (mx) params.set('max_price', mx);
+
+  const res = await fetch('/api/listings?' + params);
+  const rows = await res.json();
+  render(rows);
+}
+
+function render(rows) {
+  document.getElementById('stats').textContent = rows.length + ' listings';
+  if (!rows.length) {
+    document.getElementById('content').innerHTML = '<div class="empty">No listings match</div>';
+    return;
+  }
+  let html = '<table><thead><tr><th>Title</th><th>Typology</th><th>Price</th><th>Location</th><th>Phone</th><th>Date</th><th>Source</th></tr></thead><tbody>';
+  for (const r of rows) {
+    const date = r.timestamp ? r.timestamp.slice(0,10) : '';
+    const price = r.price ? r.price.toLocaleString('pt-AO') + ' Kz' : (r.price_text || '—');
+    html += `<tr>
+      <td class="title"><details><summary>${esc(r.title)}</summary><pre>${esc(r.raw_text)}</pre></details></td>
+      <td>${r.typology ? '<span class="tag">'+esc(r.typology)+'</span>' : ''}</td>
+      <td class="price">${esc(price)}</td>
+      <td>${esc(r.location)}</td>
+      <td>${esc(r.phone)}</td>
+      <td>${esc(date)}</td>
+      <td>${esc(r.chat_name)}</td>
+    </tr>`;
+  }
+  html += '</tbody></table>';
+  document.getElementById('content').innerHTML = html;
+}
+
+function esc(s) {
+  if (s == null) return '';
+  return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+async function refresh() {
+  const btn = document.getElementById('refreshBtn');
+  const wrap = document.getElementById('progress');
+  const label = document.getElementById('progressLabel');
+  const fill = document.getElementById('barFill');
+
+  btn.disabled = true;
+  btn.textContent = 'Refreshing…';
+  wrap.classList.add('active');
+  label.textContent = 'Connecting…';
+  fill.style.width = '0%';
+
+  try {
+    await new Promise((resolve, reject) => {
+      fetch('/api/refresh/stream').then(resp => {
+        const reader = resp.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+
+        function pump() {
+          reader.read().then(({ done, value }) => {
+            if (done) { resolve(); return; }
+            buffer += decoder.decode(value, { stream: true });
+            const parts = buffer.split('\n\n');
+            buffer = parts.pop();
+            for (const part of parts) {
+              const line = part.split('\n').find(l => l.startsWith('data: '));
+              if (!line) continue;
+              const ev = JSON.parse(line.slice(6));
+              handleEvent(ev);
+              if (ev.type === 'done') { resolve(); return; }
+            }
+            pump();
+          }).catch(reject);
+        }
+        pump();
+      }).catch(reject);
+    });
+
+    await load();
+    label.textContent = 'Done';
+    setTimeout(() => { wrap.classList.remove('active'); btn.textContent = 'Refresh from WhatsApp'; btn.disabled = false; }, 1500);
+  } catch (e) {
+    label.textContent = 'Error: ' + e;
+    btn.textContent = 'Refresh from WhatsApp';
+    btn.disabled = false;
+  }
+
+  function handleEvent(ev) {
+    if (ev.type === 'start') {
+      label.textContent = `0/${ev.total} — starting…`;
+      fill.style.width = '0%';
+    } else if (ev.type === 'step') {
+      label.textContent = `${ev.index + 1}/${ev.total} — searching "${ev.keyword}"… (${ev.inserted} found so far)`;
+    } else if (ev.type === 'step_done') {
+      const pct = ((ev.index + 1) / ev.total) * 100;
+      fill.style.width = pct + '%';
+      label.textContent = `${ev.index + 1}/${ev.total} — done "${ev.keyword}" (${ev.inserted} new)`;
+    } else if (ev.type === 'done') {
+      fill.style.width = '100%';
+      label.textContent = `Done — ${ev.inserted} new listings (${ev.total_unique} unique messages seen)`;
+    }
+  }
+}
+
+load();
+</script>
+</body>
+</html>
