@@ -18,14 +18,15 @@ var indexFS embed.FS
 var db *sql.DB
 
 type WacliMessage struct {
-	ChatJID    string `json:"ChatJID"`
-	ChatName   string `json:"ChatName"`
-	MsgID      string `json:"MsgID"`
-	SenderJID  string `json:"SenderJID"`
-	SenderName string `json:"SenderName"`
-	Timestamp  string `json:"Timestamp"`
-	FromMe     bool   `json:"FromMe"`
-	Text       string `json:"Text"`
+	ChatJID     string `json:"ChatJID"`
+	ChatName    string `json:"ChatName"`
+	MsgID       string `json:"MsgID"`
+	SenderJID   string `json:"SenderJID"`
+	SenderName  string `json:"SenderName"`
+	Timestamp   string `json:"Timestamp"`
+	FromMe      bool   `json:"FromMe"`
+	Text        string `json:"Text"`
+	DisplayText string `json:"DisplayText"`
 }
 
 type WacliResponse struct {
@@ -35,7 +36,7 @@ type WacliResponse struct {
 	} `json:"data"`
 }
 
-var searchKeywords = []string{"arrendar", "arrenda", "aluguer", "alugar", "renda", "plafond"}
+var searchKeywords = []string{"arrendar", "arrenda", "aluguer", "alugar", "renda", "plafond", "vende"}
 
 func main() {
 	var err error
@@ -72,12 +73,13 @@ func initDB() error {
 			location TEXT,
 			phone TEXT,
 			raw_text TEXT,
-			is_rental INTEGER
+			category TEXT
 		);
 		CREATE INDEX IF NOT EXISTS idx_typology ON listings(typology);
 		CREATE INDEX IF NOT EXISTS idx_location ON listings(location);
 		CREATE INDEX IF NOT EXISTS idx_price ON listings(price);
 		CREATE INDEX IF NOT EXISTS idx_timestamp ON listings(timestamp);
+		CREATE INDEX IF NOT EXISTS idx_category ON listings(category);
 	`)
 	return err
 }
@@ -95,9 +97,13 @@ func handleListings(w http.ResponseWriter, r *http.Request) {
 	minPrice := q.Get("min_price")
 	maxPrice := q.Get("max_price")
 	search := q.Get("q")
+	category := q.Get("category")
+	if category == "" {
+		category = "rental"
+	}
 
-	query := "SELECT msg_id, chat_name, timestamp, sender, title, typology, price, price_text, location, phone, raw_text FROM listings WHERE is_rental = 1"
-	args := []interface{}{}
+	query := "SELECT msg_id, chat_name, timestamp, sender, title, typology, price, price_text, location, phone, raw_text, category FROM listings WHERE category = ?"
+	args := []interface{}{category}
 
 	if typology != "" {
 		query += " AND typology = ?"
@@ -141,12 +147,13 @@ func handleListings(w http.ResponseWriter, r *http.Request) {
 		Location  string `json:"location"`
 		Phone     string `json:"phone"`
 		RawText   string `json:"raw_text"`
+		Category  string `json:"category"`
 	}
 
 	var out []Row
 	for rows.Next() {
 		var r Row
-		rows.Scan(&r.MsgID, &r.ChatName, &r.Timestamp, &r.Sender, &r.Title, &r.Typology, &r.Price, &r.PriceText, &r.Location, &r.Phone, &r.RawText)
+		rows.Scan(&r.MsgID, &r.ChatName, &r.Timestamp, &r.Sender, &r.Title, &r.Typology, &r.Price, &r.PriceText, &r.Location, &r.Phone, &r.RawText, &r.Category)
 		out = append(out, r)
 	}
 	if out == nil {
@@ -156,50 +163,60 @@ func handleListings(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(out)
 }
 
-// refreshOnce runs one keyword search and returns how many messages were seen and inserted.
-func refreshOnce(kw string, seen map[string]bool) (inserted int, seenCount int) {
+// refreshOnce runs one keyword search and returns counts per category.
+func refreshOnce(kw string, seen map[string]bool) (inserted int, seenCount int, counts map[string]int) {
+	counts = map[string]int{"rental": 0, "seeker": 0, "sale": 0, "noise": 0}
+
 	cmd := exec.Command("wacli-pro", "messages", "search", kw, "--json", "--limit", "500")
 	output, err := cmd.Output()
 	if err != nil {
 		log.Printf("wacli error for %q: %v", kw, err)
-		return 0, 0
+		return 0, 0, counts
 	}
 	var resp WacliResponse
 	if err := json.Unmarshal(output, &resp); err != nil {
 		log.Printf("json error for %q: %v", kw, err)
-		return 0, 0
+		return 0, 0, counts
 	}
 	for _, m := range resp.Data.Messages {
 		if seen[m.MsgID] {
 			continue
 		}
 		seen[m.MsgID] = true
-		l := ParseListing(m.MsgID, m.ChatName, m.Timestamp, m.SenderName, m.Text)
-		if !l.IsRental {
-			continue
-		}
+
+		l := ParseListing(m.MsgID, m.ChatName, m.Timestamp, m.SenderName, m.Text, m.DisplayText)
+		counts[l.Category]++
+
 		_, err := db.Exec(`
 			INSERT OR REPLACE INTO listings
-			(msg_id, chat_name, timestamp, sender, title, typology, price, price_text, location, phone, raw_text, is_rental)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
-		`, l.MsgID, l.ChatName, l.Timestamp, l.Sender, l.Title, l.Typology, l.Price, l.PriceText, l.Location, l.Phone, l.RawText)
+			(msg_id, chat_name, timestamp, sender, title, typology, price, price_text, location, phone, raw_text, category)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		`, l.MsgID, l.ChatName, l.Timestamp, l.Sender, l.Title, l.Typology, l.Price, l.PriceText, l.Location, l.Phone, l.RawText, l.Category)
 		if err == nil {
 			inserted++
 		}
 	}
-	return inserted, len(resp.Data.Messages)
+	return inserted, len(resp.Data.Messages), counts
 }
 
 func handleRefresh(w http.ResponseWriter, r *http.Request) {
 	total := 0
 	seen := map[string]bool{}
+	allCounts := map[string]int{"rental": 0, "seeker": 0, "sale": 0, "noise": 0}
 	for _, kw := range searchKeywords {
-		inserted, _ := refreshOnce(kw, seen)
-		total += inserted
+		ins, _, counts := refreshOnce(kw, seen)
+		total += ins
+		for k, v := range counts {
+			allCounts[k] += v
+		}
 	}
-	log.Printf("refresh done: inserted=%d, unique=%d", total, len(seen))
+	log.Printf("refresh done: inserted=%d, unique=%d, counts=%v", total, len(seen), allCounts)
 	w.Header().Set("Content-Type", "application/json")
-	fmt.Fprintf(w, `{"inserted": %d, "total_unique": %d}`, total, len(seen))
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"inserted":     total,
+		"total_unique": len(seen),
+		"counts":       allCounts,
+	})
 }
 
 func handleRefreshStream(w http.ResponseWriter, r *http.Request) {
@@ -217,6 +234,7 @@ func handleRefreshStream(w http.ResponseWriter, r *http.Request) {
 	totalKeywords := len(searchKeywords)
 	totalInserted := 0
 	seen := map[string]bool{}
+	allCounts := map[string]int{"rental": 0, "seeker": 0, "sale": 0, "noise": 0}
 
 	send := func(payload map[string]interface{}) {
 		b, _ := json.Marshal(payload)
@@ -233,13 +251,18 @@ func handleRefreshStream(w http.ResponseWriter, r *http.Request) {
 		send(map[string]interface{}{
 			"type": "step", "index": i, "total": totalKeywords,
 			"keyword": kw, "inserted": totalInserted, "seen": len(seen),
+			"counts": allCounts,
 			"message": fmt.Sprintf("searching %q", kw),
 		})
-		inserted, _ := refreshOnce(kw, seen)
+		inserted, _, counts := refreshOnce(kw, seen)
 		totalInserted += inserted
+		for k, v := range counts {
+			allCounts[k] += v
+		}
 		send(map[string]interface{}{
 			"type": "step_done", "index": i, "total": totalKeywords,
 			"keyword": kw, "inserted": totalInserted, "seen": len(seen),
+			"counts": allCounts,
 			"message": fmt.Sprintf("finished %q", kw),
 		})
 	}
@@ -247,6 +270,7 @@ func handleRefreshStream(w http.ResponseWriter, r *http.Request) {
 	send(map[string]interface{}{
 		"type": "done",
 		"inserted": totalInserted, "total_unique": len(seen),
+		"counts": allCounts,
 		"message": "refresh complete",
 	})
 }
