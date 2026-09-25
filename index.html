@@ -11,18 +11,23 @@
   button { background: #34a853; color: white; border: none; padding: 10px 18px; border-radius: 4px; cursor: pointer; font-size: 14px; }
   button:hover { background: #2d8e47; }
   button:disabled { background: #999; cursor: wait; }
-  .progress { display: none; flex: 1; max-width: 400px; }
+  .progress { display: none; flex: 1; max-width: 420px; }
   .progress.active { display: block; }
   .bar { background: rgba(255,255,255,0.3); height: 8px; border-radius: 4px; overflow: hidden; margin-top: 6px; }
   .bar-fill { background: white; height: 100%; width: 0%; transition: width 0.2s; }
   .progress-label { font-size: 12px; }
-  .filters { padding: 16px 24px; background: white; border-bottom: 1px solid #ddd; display: flex; gap: 12px; flex-wrap: wrap; }
+  .filters { padding: 16px 24px; background: white; border-bottom: 1px solid #ddd; display: flex; gap: 12px; flex-wrap: wrap; align-items: center; }
   .filters input, .filters select { padding: 8px; border: 1px solid #ccc; border-radius: 4px; font-size: 14px; }
   .filters input[type="text"] { flex: 1; min-width: 200px; }
+  .tabs { padding: 12px 24px 0; background: white; display: flex; gap: 8px; border-bottom: 1px solid #ddd; }
+  .tab { padding: 8px 16px; border: 1px solid transparent; border-bottom: none; border-radius: 4px 4px 0 0; cursor: pointer; background: #f0f0f0; font-size: 14px; }
+  .tab.active { background: white; border-color: #ddd; border-bottom-color: white; font-weight: 600; margin-bottom: -1px; }
   .stats { padding: 8px 24px; color: #666; font-size: 13px; }
   table { width: 100%; border-collapse: collapse; background: white; }
   th, td { padding: 10px 12px; text-align: left; border-bottom: 1px solid #eee; font-size: 13px; vertical-align: top; }
-  th { background: #fafafa; font-weight: 600; position: sticky; top: 0; }
+  th { background: #fafafa; font-weight: 600; position: sticky; top: 0; cursor: pointer; user-select: none; }
+  th:hover { background: #eef2f7; }
+  th .sort-ind { color: #1a73e8; margin-left: 4px; font-size: 11px; }
   tr:hover { background: #f9f9f9; }
   .title { font-weight: 600; max-width: 400px; }
   .price { color: #1a73e8; font-weight: 600; white-space: nowrap; }
@@ -43,6 +48,13 @@
   <button id="refreshBtn" onclick="refresh()">Refresh from WhatsApp</button>
 </header>
 
+<div class="tabs">
+  <div class="tab active" data-cat="rental" onclick="setCat('rental')">Rentals</div>
+  <div class="tab" data-cat="seeker" onclick="setCat('seeker')">Seekers</div>
+  <div class="tab" data-cat="sale" onclick="setCat('sale')">Sales</div>
+  <div class="tab" data-cat="noise" onclick="setCat('noise')">Noise</div>
+</div>
+
 <div class="filters">
   <input type="text" id="q" placeholder="Search title or text..." oninput="debounceLoad()">
   <select id="typology" onchange="load()">
@@ -53,6 +65,15 @@
     <option>APARTAMENTO</option><option>VIVENDA</option><option>MORADIA</option>
     <option>QUARTO</option><option>DUPLEX</option>
   </select>
+  <select id="sortBy" onchange="onDropdownChange()">
+    <option value="timestamp|desc">Newest first</option>
+    <option value="timestamp|asc">Oldest first</option>
+    <option value="price|asc">Price: low → high</option>
+    <option value="price|desc">Price: high → low</option>
+    <option value="location|asc">Location A → Z</option>
+    <option value="typology|asc">Typology A → Z</option>
+    <option value="title|asc">Title A → Z</option>
+  </select>
   <input type="number" id="minPrice" placeholder="Min Kz" oninput="debounceLoad()" style="width:120px">
   <input type="number" id="maxPrice" placeholder="Max Kz" oninput="debounceLoad()" style="width:120px">
 </div>
@@ -62,10 +83,67 @@
 
 <script>
 let timer;
+let currentCat = 'rental';
+let sortCol = 'timestamp';
+let sortDir = 'desc';
+
 function debounceLoad() { clearTimeout(timer); timer = setTimeout(load, 300); }
+
+function setCat(cat) {
+  currentCat = cat;
+  document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.cat === cat));
+  load();
+}
+
+function onDropdownChange() {
+  const val = document.getElementById('sortBy').value;
+  if (!val) return;
+  const [c, d] = val.split('|');
+  sortCol = c;
+  sortDir = d;
+  load();
+}
+
+function setSort(col) {
+  if (sortCol === col) {
+    sortDir = sortDir === 'asc' ? 'desc' : 'asc';
+  } else {
+    sortCol = col;
+    sortDir = 'asc';
+  }
+  syncDropdown();
+  load();
+}
+
+function syncDropdown() {
+  const sel = document.getElementById('sortBy');
+  const target = `${sortCol}|${sortDir}`;
+  if ([...sel.options].some(o => o.value === target)) {
+    sel.value = target;
+  } else {
+    // no matching preset — clear so the header indicator is the source of truth
+    sel.value = '';
+  }
+}
+
+function renderSortIndicators() {
+  document.querySelectorAll('th').forEach(th => {
+    const ind = th.querySelector('.sort-ind');
+    if (ind) ind.remove();
+    if (th.dataset.col === sortCol) {
+      const span = document.createElement('span');
+      span.className = 'sort-ind';
+      span.textContent = sortDir === 'asc' ? '▲' : '▼';
+      th.appendChild(span);
+    }
+  });
+}
 
 async function load() {
   const params = new URLSearchParams();
+  params.set('category', currentCat);
+  params.set('sort_col', sortCol);
+  params.set('sort_dir', sortDir);
   const q = document.getElementById('q').value;
   const t = document.getElementById('typology').value;
   const mn = document.getElementById('minPrice').value;
@@ -78,15 +156,29 @@ async function load() {
   const res = await fetch('/api/listings?' + params);
   const rows = await res.json();
   render(rows);
+  renderSortIndicators();
 }
 
 function render(rows) {
-  document.getElementById('stats').textContent = rows.length + ' listings';
+  document.getElementById('stats').textContent = rows.length + ' ' + currentCat;
   if (!rows.length) {
-    document.getElementById('content').innerHTML = '<div class="empty">No listings match</div>';
+    document.getElementById('content').innerHTML = '<div class="empty">Nothing here</div>';
     return;
   }
-  let html = '<table><thead><tr><th>Title</th><th>Typology</th><th>Price</th><th>Location</th><th>Phone</th><th>Date</th><th>Source</th></tr></thead><tbody>';
+  const headers = [
+    { col: 'title', label: 'Title' },
+    { col: 'typology', label: 'Typology' },
+    { col: 'price', label: 'Price' },
+    { col: 'location', label: 'Location' },
+    { col: 'phone', label: 'Phone' },
+    { col: 'timestamp', label: 'Date' },
+    { col: 'chat_name', label: 'Source' },
+  ];
+  let html = '<table><thead><tr>';
+  for (const h of headers) {
+    html += `<th data-col="${h.col}" onclick="setSort('${h.col}')">${h.label}</th>`;
+  }
+  html += '</tr></thead><tbody>';
   for (const r of rows) {
     const date = r.timestamp ? r.timestamp.slice(0,10) : '';
     const price = r.price ? r.price.toLocaleString('pt-AO') + ' Kz' : (r.price_text || '—');
@@ -162,14 +254,16 @@ async function refresh() {
       label.textContent = `0/${ev.total} — starting…`;
       fill.style.width = '0%';
     } else if (ev.type === 'step') {
-      label.textContent = `${ev.index + 1}/${ev.total} — searching "${ev.keyword}"… (${ev.inserted} found so far)`;
+      label.textContent = `${ev.index + 1}/${ev.total} — searching "${ev.keyword}"…`;
     } else if (ev.type === 'step_done') {
       const pct = ((ev.index + 1) / ev.total) * 100;
       fill.style.width = pct + '%';
-      label.textContent = `${ev.index + 1}/${ev.total} — done "${ev.keyword}" (${ev.inserted} new)`;
+      const c = ev.counts || {};
+      label.textContent = `${ev.index + 1}/${ev.total} — rentals:${c.rental||0} seek:${c.seeker||0} sale:${c.sale||0} noise:${c.noise||0}`;
     } else if (ev.type === 'done') {
       fill.style.width = '100%';
-      label.textContent = `Done — ${ev.inserted} new listings (${ev.total_unique} unique messages seen)`;
+      const c = ev.counts || {};
+      label.textContent = `Done — rentals:${c.rental||0} seek:${c.seeker||0} sale:${c.sale||0} noise:${c.noise||0}`;
     }
   }
 }

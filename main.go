@@ -98,8 +98,29 @@ func handleListings(w http.ResponseWriter, r *http.Request) {
 	maxPrice := q.Get("max_price")
 	search := q.Get("q")
 	category := q.Get("category")
+	sortCol := q.Get("sort_col")
+	sortDir := q.Get("sort_dir")
+
 	if category == "" {
 		category = "rental"
+	}
+	if sortCol == "" {
+		sortCol = "timestamp"
+	}
+	if sortDir == "" {
+		sortDir = "desc"
+	}
+
+	// whitelist sort columns to prevent SQL injection
+	allowedCols := map[string]bool{
+		"title": true, "typology": true, "price": true,
+		"location": true, "phone": true, "timestamp": true, "chat_name": true,
+	}
+	if !allowedCols[sortCol] {
+		sortCol = "timestamp"
+	}
+	if sortDir != "asc" && sortDir != "desc" {
+		sortDir = "desc"
 	}
 
 	query := "SELECT msg_id, chat_name, timestamp, sender, title, typology, price, price_text, location, phone, raw_text, category FROM listings WHERE category = ?"
@@ -126,7 +147,9 @@ func handleListings(w http.ResponseWriter, r *http.Request) {
 		s := "%" + search + "%"
 		args = append(args, s, s)
 	}
-	query += " ORDER BY timestamp DESC LIMIT 500"
+
+	// NULLs last for price so unparsed rows don't float to the top
+	query += fmt.Sprintf(" ORDER BY %s %s NULLS LAST, timestamp DESC LIMIT 500", sortCol, sortDir)
 
 	rows, err := db.Query(query, args...)
 	if err != nil {
