@@ -9,7 +9,7 @@ import (
 	"net/http"
 	"os/exec"
 
-	_ "github.com/mattn/go-sqlite3"
+	_ "modernc.org/sqlite"
 )
 
 //go:embed index.html
@@ -40,7 +40,7 @@ var searchKeywords = []string{"arrendar", "arrenda", "aluguer", "alugar", "renda
 
 func main() {
 	var err error
-	db, err = sql.Open("sqlite3", "listings.db")
+	db, err = sql.Open("sqlite", "listings.db")
 	if err != nil {
 		log.Fatal(err)
 	}
