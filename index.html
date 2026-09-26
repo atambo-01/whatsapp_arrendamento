@@ -29,13 +29,23 @@
   th:hover { background: #eef2f7; }
   th .sort-ind { color: #1a73e8; margin-left: 4px; font-size: 11px; }
   tr:hover { background: #f9f9f9; }
-  .title { font-weight: 600; max-width: 400px; }
+  .title { font-weight: 600; max-width: 380px; }
   .price { color: #1a73e8; font-weight: 600; white-space: nowrap; }
   .tag { display: inline-block; padding: 2px 8px; border-radius: 3px; background: #e8f0fe; color: #1a73e8; font-size: 12px; }
   .empty { padding: 40px; text-align: center; color: #999; }
   details { cursor: pointer; }
   details summary { color: #666; font-size: 12px; }
   details pre { white-space: pre-wrap; font-size: 12px; background: #f5f5f5; padding: 8px; border-radius: 4px; max-height: 200px; overflow: auto; }
+  .actions { white-space: nowrap; }
+  .copy-btn { background: #1a73e8; color: white; border: none; padding: 4px 10px; border-radius: 3px; font-size: 12px; cursor: pointer; }
+  .copy-btn:hover { background: #1558b8; }
+  #toast {
+    position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%);
+    background: #333; color: white; padding: 10px 18px; border-radius: 4px;
+    font-size: 13px; opacity: 0; transition: opacity 0.2s; pointer-events: none;
+    z-index: 1000;
+  }
+  #toast.show { opacity: 1; }
 </style>
 </head>
 <body>
@@ -80,6 +90,7 @@
 
 <div class="stats" id="stats"></div>
 <div id="content"><div class="empty">Click "Refresh from WhatsApp" to load listings</div></div>
+<div id="toast"></div>
 
 <script>
 let timer;
@@ -92,15 +103,6 @@ function debounceLoad() { clearTimeout(timer); timer = setTimeout(load, 300); }
 function setCat(cat) {
   currentCat = cat;
   document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.cat === cat));
-  load();
-}
-
-function onDropdownChange() {
-  const val = document.getElementById('sortBy').value;
-  if (!val) return;
-  const [c, d] = val.split('|');
-  sortCol = c;
-  sortDir = d;
   load();
 }
 
@@ -121,9 +123,17 @@ function syncDropdown() {
   if ([...sel.options].some(o => o.value === target)) {
     sel.value = target;
   } else {
-    // no matching preset — clear so the header indicator is the source of truth
     sel.value = '';
   }
+}
+
+function onDropdownChange() {
+  const val = document.getElementById('sortBy').value;
+  if (!val) return;
+  const [c, d] = val.split('|');
+  sortCol = c;
+  sortDir = d;
+  load();
 }
 
 function renderSortIndicators() {
@@ -159,6 +169,29 @@ async function load() {
   renderSortIndicators();
 }
 
+function showToast(msg) {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.classList.add('show');
+  setTimeout(() => t.classList.remove('show'), 1800);
+}
+
+async function copySearch(row) {
+  // Prefer the title, fall back to the first ~60 chars of the raw text.
+  let snippet = (row.title || '').trim();
+  if (snippet.length < 10 && row.raw_text) {
+    snippet = row.raw_text.trim().slice(0, 60);
+  }
+  // Take just the first line, and cap length so WhatsApp search works well.
+  snippet = snippet.split('\n')[0].trim().slice(0, 60);
+  try {
+    await navigator.clipboard.writeText(snippet);
+    showToast('Copied. Paste into WhatsApp search (Ctrl+V).');
+  } catch (e) {
+    showToast('Copy failed — select the text manually.');
+  }
+}
+
 function render(rows) {
   document.getElementById('stats').textContent = rows.length + ' ' + currentCat;
   if (!rows.length) {
@@ -178,8 +211,9 @@ function render(rows) {
   for (const h of headers) {
     html += `<th data-col="${h.col}" onclick="setSort('${h.col}')">${h.label}</th>`;
   }
-  html += '</tr></thead><tbody>';
-  for (const r of rows) {
+  html += '<th>Actions</th></tr></thead><tbody>';
+  for (let i = 0; i < rows.length; i++) {
+    const r = rows[i];
     const date = r.timestamp ? r.timestamp.slice(0,10) : '';
     const price = r.price ? r.price.toLocaleString('pt-AO') + ' Kz' : (r.price_text || '—');
     html += `<tr>
@@ -190,10 +224,17 @@ function render(rows) {
       <td>${esc(r.phone)}</td>
       <td>${esc(date)}</td>
       <td>${esc(r.chat_name)}</td>
+      <td class="actions"><button class="copy-btn" onclick="copySearchByIndex(${i})">Find in WhatsApp</button></td>
     </tr>`;
   }
   html += '</tbody></table>';
   document.getElementById('content').innerHTML = html;
+  window.__rows = rows;
+}
+
+function copySearchByIndex(i) {
+  const row = window.__rows[i];
+  if (row) copySearch(row);
 }
 
 function esc(s) {

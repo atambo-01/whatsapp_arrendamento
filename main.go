@@ -64,8 +64,10 @@ func initDB() error {
 		CREATE TABLE IF NOT EXISTS listings (
 			msg_id TEXT PRIMARY KEY,
 			chat_name TEXT,
+			chat_jid TEXT,
 			timestamp TEXT,
 			sender TEXT,
+			sender_jid TEXT,
 			title TEXT,
 			typology TEXT,
 			price INTEGER,
@@ -111,7 +113,6 @@ func handleListings(w http.ResponseWriter, r *http.Request) {
 		sortDir = "desc"
 	}
 
-	// whitelist sort columns to prevent SQL injection
 	allowedCols := map[string]bool{
 		"title": true, "typology": true, "price": true,
 		"location": true, "phone": true, "timestamp": true, "chat_name": true,
@@ -123,7 +124,7 @@ func handleListings(w http.ResponseWriter, r *http.Request) {
 		sortDir = "desc"
 	}
 
-	query := "SELECT msg_id, chat_name, timestamp, sender, title, typology, price, price_text, location, phone, raw_text, category FROM listings WHERE category = ?"
+	query := "SELECT msg_id, chat_name, chat_jid, timestamp, sender, sender_jid, title, typology, price, price_text, location, phone, raw_text, category FROM listings WHERE category = ?"
 	args := []interface{}{category}
 
 	if typology != "" {
@@ -148,7 +149,6 @@ func handleListings(w http.ResponseWriter, r *http.Request) {
 		args = append(args, s, s)
 	}
 
-	// NULLs last for price so unparsed rows don't float to the top
 	query += fmt.Sprintf(" ORDER BY %s %s NULLS LAST, timestamp DESC LIMIT 500", sortCol, sortDir)
 
 	rows, err := db.Query(query, args...)
@@ -161,8 +161,10 @@ func handleListings(w http.ResponseWriter, r *http.Request) {
 	type Row struct {
 		MsgID     string `json:"msg_id"`
 		ChatName  string `json:"chat_name"`
+		ChatJID   string `json:"chat_jid"`
 		Timestamp string `json:"timestamp"`
 		Sender    string `json:"sender"`
+		SenderJID string `json:"sender_jid"`
 		Title     string `json:"title"`
 		Typology  string `json:"typology"`
 		Price     int    `json:"price"`
@@ -176,7 +178,7 @@ func handleListings(w http.ResponseWriter, r *http.Request) {
 	var out []Row
 	for rows.Next() {
 		var r Row
-		rows.Scan(&r.MsgID, &r.ChatName, &r.Timestamp, &r.Sender, &r.Title, &r.Typology, &r.Price, &r.PriceText, &r.Location, &r.Phone, &r.RawText, &r.Category)
+		rows.Scan(&r.MsgID, &r.ChatName, &r.ChatJID, &r.Timestamp, &r.Sender, &r.SenderJID, &r.Title, &r.Typology, &r.Price, &r.PriceText, &r.Location, &r.Phone, &r.RawText, &r.Category)
 		out = append(out, r)
 	}
 	if out == nil {
@@ -186,7 +188,6 @@ func handleListings(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(out)
 }
 
-// refreshOnce runs one keyword search and returns counts per category.
 func refreshOnce(kw string, seen map[string]bool) (inserted int, seenCount int, counts map[string]int) {
 	counts = map[string]int{"rental": 0, "seeker": 0, "sale": 0, "noise": 0}
 
@@ -207,14 +208,14 @@ func refreshOnce(kw string, seen map[string]bool) (inserted int, seenCount int, 
 		}
 		seen[m.MsgID] = true
 
-		l := ParseListing(m.MsgID, m.ChatName, m.Timestamp, m.SenderName, m.Text, m.DisplayText)
+		l := ParseListing(m.MsgID, m.ChatName, m.ChatJID, m.Timestamp, m.SenderName, m.SenderJID, m.Text, m.DisplayText)
 		counts[l.Category]++
 
 		_, err := db.Exec(`
 			INSERT OR REPLACE INTO listings
-			(msg_id, chat_name, timestamp, sender, title, typology, price, price_text, location, phone, raw_text, category)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-		`, l.MsgID, l.ChatName, l.Timestamp, l.Sender, l.Title, l.Typology, l.Price, l.PriceText, l.Location, l.Phone, l.RawText, l.Category)
+			(msg_id, chat_name, chat_jid, timestamp, sender, sender_jid, title, typology, price, price_text, location, phone, raw_text, category)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		`, l.MsgID, l.ChatName, l.ChatJID, l.Timestamp, l.Sender, l.SenderJID, l.Title, l.Typology, l.Price, l.PriceText, l.Location, l.Phone, l.RawText, l.Category)
 		if err == nil {
 			inserted++
 		}
