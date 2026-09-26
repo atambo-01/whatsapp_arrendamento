@@ -4,6 +4,8 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+
+	"github.com/agnivade/levenshtein"
 )
 
 type Listing struct {
@@ -33,15 +35,146 @@ var (
 	rePhone      = regexp.MustCompile(`\b(?:9\d{2}[\s\-]?\d{3}[\s\-]?\d{3}|9\d{8})\b`)
 	reSpam       = regexp.MustCompile(`(?i)(kwanzabet|shopee\.com\.br|chat vip|affiliates/?btag|wa\.me/message)`)
 	reMedia      = regexp.MustCompile(`^(sent (image|video|audio|sticker|document)|\(message\))$`)
+	reWord       = regexp.MustCompile(`[A-Za-zÀ-ÿ0-9]+`)
 )
 
 var knownLocations = []string{
-	"Talatona", "Camama", "Morro Bento", "Golf 2", "Golfo 2", "Nova Vida",
-	"Zango", "Viana", "Luanda Sul", "Kilamba", "Patriota", "Samba",
-	"Benfica", "Rocha Pinto", "Cazenga", "Rangel", "Maianga", "Fubu",
-	"Gamek", "Soba Kapassa", "Capolo", "Petrangol", "Cacuaco", "Palanca",
-	"Calemba", "Mufulama", "Cassenda", "Prenda", "Futungo", "Corimba",
-	"Ilha de Luanda", "Tala Hady", "Kimbango", "Kikuxi",
+	// Municipalities & major districts
+	"Talatona", "Belas", "Cacuaco", "Cazenga", "Viana", "Kilamba Kiaxi",
+	"Kilamba", "Icolo e Bengo", "Quissama", "Mussulo", "Ingombota",
+	"Maianga", "Rangel", "Samba", "Sambizanga", "Hoji ya Henda",
+
+	// Core neighborhoods
+	"Camama", "Morro Bento", "Nova Vida", "Golf 2", "Golfo 2", "Golfe 2",
+	"Golf 1", "Golfe 1", "Zango", "Luanda Sul", "Patriota", "Lar do Patriota",
+	"Benfica", "Rocha Pinto", "Rocha", "Fubu", "Gamek", "Soba Kapassa",
+	"Capolo", "Petrangol", "Palanca", "Calemba", "Mufulama", "Cassenda",
+	"Prenda", "Futungo", "Futungo de Belas", "Corimba", "Ilha de Luanda",
+	"Ilha do Cabo", "Tala Hady", "Tala-Alice", "Kimbango", "Kikuxi",
+	"Bairro Popular", "Bairro Militar", "Bairro Azul", "Bairro das Tendas",
+	"Terra Nova", "Dangereux", "Vila Flor", "Vila Alice", "Jango", "Sapu",
+	"Quinguele", "Sagrada Esperança", "Zamba", "Cassequel", "Ngola Kiluanje",
+	"Catambor", "Cuca", "Mártires do Kifangondo", "Mártires de Kifangondo",
+	"Vila Estoril", "Morro da Luz", "Kikolo", "Cabolombo", "Ramiros",
+	"São Paulo", "Mabor", "Panguila", "Sequele", "Kima Kieza",
+	"Vila Verde", "Quenguela", "Morro dos Veados",
+
+	// Zones with numbers
+	"Zango 0", "Zango 1", "Zango 2", "Zango 3", "Zango 4", "Zango 5",
+	"Camama 1", "Camama 2", "Camama 3", "Camama 4",
+
+	// Landmarks / reference places
+	"Angomart", "Kero", "Xyami", "Belas Shopping", "Fortaleza",
+	"Cidadela", "Aeroporto", "Porto de Luanda", "Marginal", "Miramar",
+	"Alvalade", "Maculusso", "Mutamba", "Coqueiros", "Chicala",
+	"Bairro Operário", "Quinanga", "Margal", "Estalagem",
+}
+
+// Base names that expect a numeric suffix. We handle these before fuzzy matching
+// so "Golf 1" can't accidentally match "Golf 2".
+var numberedBases = []string{"golf", "golfe", "golfo", "zango", "camama"}
+
+// matchLocation tries to find the best location match in the text.
+func matchLocation(text string) string {
+	lower := strings.ToLower(text)
+
+	// Pass 0: numbered base + digit → exact build, before anything else.
+	// e.g. text contains "golf 1" → return "Golf 1".
+	for _, base := range numberedBases {
+		// look for "<base> <digit>" or "<base><digit>"
+		for _, digit := range []string{"0", "1", "2", "3", "4", "5"} {
+			patterns := []string{
+				base + " " + digit,
+				base + digit,
+			}
+			for _, pat := range patterns {
+				if strings.Contains(lower, pat) {
+					// find the canonical form in the list
+					for _, loc := range knownLocations {
+						locLower := strings.ToLower(loc)
+						if strings.HasPrefix(locLower, base+" ") && strings.HasSuffix(locLower, " "+digit) {
+							return loc
+						}
+					}
+				}
+			}
+		}
+	}
+
+	// Pass 1: exact substring match against known locations.
+	for _, loc := range knownLocations {
+		if strings.Contains(lower, strings.ToLower(loc)) {
+			// If the matched location has a trailing number, make sure the text
+			// isn't actually pointing at a different number. If so, skip.
+			if hasTrailingNumber(loc) {
+				// Only accept if the exact "base number" appears (already handled above),
+				// so this branch effectively means: reject and let fuzzy decide.
+				continue
+			}
+			return loc
+		}
+	}
+
+	// Pass 2: fuzzy on word windows of 1-3 words.
+	words := reWord.FindAllString(text, -1)
+	if len(words) == 0 {
+		return ""
+	}
+
+	bestScore := 0.0
+	bestLoc := ""
+
+	for _, loc := range knownLocations {
+		// Skip numbered locations in fuzzy — they were handled in pass 0.
+		if hasTrailingNumber(loc) {
+			continue
+		}
+		locLower := strings.ToLower(loc)
+		for windowSize := 1; windowSize <= 3; windowSize++ {
+			for i := 0; i+windowSize <= len(words); i++ {
+				candidate := strings.ToLower(strings.Join(words[i:i+windowSize], " "))
+				score := similarity(candidate, locLower)
+				if score > bestScore {
+					bestScore = score
+					bestLoc = loc
+				}
+			}
+		}
+	}
+
+	if bestScore >= 0.80 {
+		return bestLoc
+	}
+	return ""
+}
+
+// hasTrailingNumber reports whether a location name ends with " <digit>".
+func hasTrailingNumber(loc string) bool {
+	parts := strings.Fields(loc)
+	if len(parts) < 2 {
+		return false
+	}
+	last := parts[len(parts)-1]
+	if len(last) != 1 {
+		return false
+	}
+	return last[0] >= '0' && last[0] <= '9'
+}
+
+// similarity returns 1.0 for identical strings, 0.0 for completely different.
+func similarity(a, b string) float64 {
+	if a == b {
+		return 1.0
+	}
+	if len(a) == 0 || len(b) == 0 {
+		return 0.0
+	}
+	dist := levenshtein.ComputeDistance(a, b)
+	maxLen := len(a)
+	if len(b) > maxLen {
+		maxLen = len(b)
+	}
+	return 1.0 - float64(dist)/float64(maxLen)
 }
 
 func ParseListing(msgID, chatName, chatJID, timestamp, sender, senderJID, text, displayText string) Listing {
@@ -92,13 +225,7 @@ func ParseListing(msgID, chatName, chatJID, timestamp, sender, senderJID, text, 
 		l.PriceText = m[0]
 	}
 
-	lower := strings.ToLower(clean)
-	for _, loc := range knownLocations {
-		if strings.Contains(lower, strings.ToLower(loc)) {
-			l.Location = loc
-			break
-		}
-	}
+	l.Location = matchLocation(clean)
 
 	if m := rePhone.FindString(clean); m != "" {
 		l.Phone = strings.ReplaceAll(strings.ReplaceAll(m, " ", ""), "-", "")

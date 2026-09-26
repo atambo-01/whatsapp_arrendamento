@@ -309,7 +309,20 @@ async function refresh() {
   }
 }
 
-load();
+// On first load, if the DB is empty, kick off a refresh automatically.
+(async () => {
+  try {
+    const res = await fetch('/api/listings?category=rental');
+    const rows = await res.json();
+    if (rows.length === 0) {
+      refresh();
+    } else {
+      load();
+    }
+  } catch (e) {
+    load();
+  }
+})();
 </script>
 </body>
 </html>
