@@ -64,8 +64,8 @@ func main() {
 	http.HandleFunc("/api/refresh/stream", handleRefreshStream)
 	http.HandleFunc("/api/sync-status", handleSyncStatus)
 
-	log.Println("Server running at http://localhost:8080")
-	log.Fatal(http.ListenAndServe(":8080", nil))
+	log.Println("Server running at http://localhost:8090")
+	log.Fatal(http.ListenAndServe(":8090", nil))
 }
 
 func initDB() error {
@@ -310,11 +310,9 @@ func handleRefreshStream(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// handleSyncStatus reports how fresh the local wacli-pro data is.
 func handleSyncStatus(w http.ResponseWriter, r *http.Request) {
 	result := map[string]string{}
 
-	// 1. Get message counts and auth status from `doctor`.
 	doctorCmd := exec.Command("wacli-pro", "doctor")
 	if output, err := doctorCmd.Output(); err == nil {
 		for _, line := range strings.Split(string(output), "\n") {
@@ -329,7 +327,6 @@ func handleSyncStatus(w http.ResponseWriter, r *http.Request) {
 		result["error"] = err.Error()
 	}
 
-	// 2. Get the newest message timestamp by asking wacli-pro for one message.
 	listCmd := exec.Command("wacli-pro", "messages", "list", "--json", "--limit", "1")
 	if output, err := listCmd.Output(); err == nil {
 		var resp WacliResponse
@@ -338,7 +335,6 @@ func handleSyncStatus(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// 3. Fallback: check our own listings.db for the newest captured listing.
 	if result["LAST_SYNC"] == "" {
 		var ts sql.NullString
 		_ = db.QueryRow(`SELECT MAX(timestamp) FROM listings`).Scan(&ts)
