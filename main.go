@@ -159,7 +159,11 @@ func handleListings(w http.ResponseWriter, r *http.Request) {
 		args = append(args, s, s)
 	}
 
-	query += fmt.Sprintf(" ORDER BY %s %s NULLS LAST, timestamp DESC LIMIT 500", sortCol, sortDir)
+	if sortDir == "asc" {
+		query += fmt.Sprintf(" ORDER BY CASE WHEN %s IS NULL OR %s = '' THEN 1 ELSE 0 END, %s ASC, timestamp DESC LIMIT 500", sortCol, sortCol, sortCol)
+	} else {
+		query += fmt.Sprintf(" ORDER BY CASE WHEN %s IS NULL OR %s = '' THEN 1 ELSE 0 END, %s DESC, timestamp DESC LIMIT 500", sortCol, sortCol, sortCol)
+	}
 
 	rows, err := db.Query(query, args...)
 	if err != nil {

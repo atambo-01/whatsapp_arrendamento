@@ -30,17 +30,19 @@
   th:hover { background: #eef2f7; }
   th .sort-ind { color: #1a73e8; margin-left: 4px; font-size: 11px; }
   tr:hover { background: #f9f9f9; }
+  .row-num { color: #999; font-size: 12px; text-align: right; width: 40px; font-variant-numeric: tabular-nums; cursor: default; }
   .title { font-weight: 600; max-width: 380px; }
   .price { color: #1a73e8; font-weight: 600; white-space: nowrap; }
   .tag { display: inline-block; padding: 2px 8px; border-radius: 3px; background: #e8f0fe; color: #1a73e8; font-size: 12px; }
   .empty { padding: 40px; text-align: center; color: #999; }
   details { cursor: pointer; }
-  details summary { color: #666; font-size: 12px; }
+  details summary { color: #333; font-size: 13px; }
   details pre { white-space: pre-wrap; font-size: 12px; background: #f5f5f5; padding: 8px; border-radius: 4px; max-height: 200px; overflow: auto; }
   .actions { white-space: nowrap; }
   .copy-btn { background: #1a73e8; color: white; border: none; padding: 4px 10px; border-radius: 3px; font-size: 12px; cursor: pointer; }
   .copy-btn:hover { background: #1558b8; }
   .loc-raw { color: #666; font-size: 11px; font-style: italic; display: block; margin-top: 2px; }
+  .placeholder { color: #999; font-style: italic; }
   #toast {
     position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%);
     background: #333; color: white; padding: 10px 18px; border-radius: 4px;
@@ -194,6 +196,16 @@ async function copySearch(row) {
   }
 }
 
+function esc(s) {
+  if (s == null) return '';
+  return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+function titleOr(s, fallback) {
+  const t = (s || '').trim();
+  return t ? esc(t) : '<span class="placeholder">' + fallback + '</span>';
+}
+
 function render(rows) {
   document.getElementById('stats').textContent = rows.length + ' ' + currentCat;
   if (!rows.length) {
@@ -210,6 +222,7 @@ function render(rows) {
     { col: 'chat_name', label: 'Source' },
   ];
   let html = '<table><thead><tr>';
+  html += '<th class="row-num">#</th>';
   for (const h of headers) {
     html += `<th data-col="${h.col}" onclick="setSort('${h.col}')">${h.label}</th>`;
   }
@@ -230,7 +243,8 @@ function render(rows) {
       locCell = '<span class="loc-raw">—</span>';
     }
     html += `<tr>
-      <td class="title"><details><summary>${esc(r.title)}</summary><pre>${esc(r.raw_text)}</pre></details></td>
+      <td class="row-num">${i + 1}</td>
+      <td class="title"><details><summary>${titleOr(r.title, '(sem título)')}</summary><pre>${esc(r.raw_text)}</pre></details></td>
       <td>${r.typology ? '<span class="tag">'+esc(r.typology)+'</span>' : ''}</td>
       <td class="price">${esc(price)}</td>
       <td>${locCell}</td>
@@ -248,11 +262,6 @@ function render(rows) {
 function copySearchByIndex(i) {
   const row = window.__rows[i];
   if (row) copySearch(row);
-}
-
-function esc(s) {
-  if (s == null) return '';
-  return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 }
 
 async function loadSyncStatus() {
@@ -349,7 +358,6 @@ async function refresh() {
   }
 }
 
-// On first load, if the DB is empty, kick off a refresh automatically.
 (async () => {
   loadSyncStatus();
   setInterval(loadSyncStatus, 60000);
