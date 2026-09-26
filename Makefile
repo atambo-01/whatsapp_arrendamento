@@ -13,7 +13,7 @@ BLUE   := \033[0;34m
 BOLD   := \033[1m
 RESET  := \033[0m
 
-.PHONY: all build run restart stop start clean clean-db clean-all status logs doctor sync sync-stop sync-start backfill tidy fmt help
+.PHONY: all build rebuild run restart stop start clean clean-db clean-all status logs doctor sync sync-stop sync-start backfill tidy fmt help
 
 all: build
 
@@ -25,6 +25,29 @@ build: ## Build the binary
 	  printf "$(GREEN)  ✔ Build succeeded$(RESET)\n"; \
 	else \
 	  printf "$(RED)  ✘ Build failed$(RESET)\n"; \
+	  exit 1; \
+	fi
+
+rebuild: ## Wipe binary and DB, rebuild, restart service
+	@rm -f $(BIN) listings.db
+	@printf "$(GREEN)  ✔ Cleaned binary and database$(RESET)\n"
+	@if go build -o $(BIN) $(PKG); then \
+	  printf "$(GREEN)  ✔ Build succeeded$(RESET)\n"; \
+	else \
+	  printf "$(RED)  ✘ Build failed$(RESET)\n"; \
+	  exit 1; \
+	fi
+	@printf "$(BLUE)  → Restarting $(SERVICE)$(RESET)\n"
+	@if systemctl --user restart $(SERVICE); then \
+	  sleep 1; \
+	  if systemctl --user is-active --quiet $(SERVICE); then \
+	    printf "$(GREEN)  ✔ Service is running$(RESET)\n"; \
+	  else \
+	    printf "$(RED)  ✘ Service failed to start — check 'make logs'$(RESET)\n"; \
+	    exit 1; \
+	  fi; \
+	else \
+	  printf "$(RED)  ✘ Restart command failed$(RESET)\n"; \
 	  exit 1; \
 	fi
 
