@@ -9,20 +9,21 @@ import (
 )
 
 type Listing struct {
-	MsgID     string
-	ChatName  string
-	ChatJID   string
-	Sender    string
-	SenderJID string
-	Timestamp string
-	Title     string
-	Typology  string
-	Price     int
-	PriceText string
-	Location  string
-	Phone     string
-	RawText   string
-	Category  string
+	MsgID       string
+	ChatName    string
+	ChatJID     string
+	Sender      string
+	SenderJID   string
+	Timestamp   string
+	Title       string
+	Typology    string
+	Price       int
+	PriceText   string
+	Location    string
+	LocationRaw string
+	Phone       string
+	RawText     string
+	Category    string
 }
 
 var (
@@ -37,6 +38,22 @@ var (
 	reMedia      = regexp.MustCompile(`^(sent (image|video|audio|sticker|document)|\(message\))$`)
 	reWord       = regexp.MustCompile(`[A-Za-zÀ-ÿ0-9]+`)
 )
+
+var locationMarkers = []string{
+	"📍 localização", "📍 localizacao", "📍",
+	"localização", "localizacao", "localizado em", "localizado no", "localizado na",
+	"local", "loc:", "loc.",
+	"gps", "endereço", "endereco", "morada",
+	"situado em", "situado no", "situado na", "situada em", "situada no", "situada na",
+	"zona", "bairro", "rua", "avenida", "av.",
+	"referência", "referencia", "ponto de referência", "ponto de referencia",
+	"junto ao", "junto à", "junto a", "ao lado de", "ao lado do", "ao lado da",
+	"por trás de", "por trás do", "por trás da", "atrás de", "atrás do", "atrás da",
+	"próximo de", "próximo do", "próximo da", "perto de", "perto do", "perto da",
+	"nas mediações de", "nas mediações do", "nas mediações da",
+	"nas imediações de", "nas imediações do", "nas imediações da",
+	"defronte a", "defronte ao", "defronte à", "em frente a", "em frente ao", "em frente à",
+}
 
 var knownLocations = []string{
 	// Municipalities & major districts
@@ -70,29 +87,18 @@ var knownLocations = []string{
 	"Bairro Operário", "Quinanga", "Margal", "Estalagem",
 }
 
-// Base names that expect a numeric suffix. We handle these before fuzzy matching
-// so "Golf 1" can't accidentally match "Golf 2".
 var numberedBases = []string{"golf", "golfe", "golfo", "zango", "camama"}
 
-// matchLocation tries to find the best location match in the text.
 func matchLocation(text string) string {
 	lower := strings.ToLower(text)
 
-	// Pass 0: numbered base + digit → exact build, before anything else.
-	// e.g. text contains "golf 1" → return "Golf 1".
 	for _, base := range numberedBases {
-		// look for "<base> <digit>" or "<base><digit>"
 		for _, digit := range []string{"0", "1", "2", "3", "4", "5"} {
-			patterns := []string{
-				base + " " + digit,
-				base + digit,
-			}
-			for _, pat := range patterns {
+			for _, pat := range []string{base + " " + digit, base + digit} {
 				if strings.Contains(lower, pat) {
-					// find the canonical form in the list
 					for _, loc := range knownLocations {
-						locLower := strings.ToLower(loc)
-						if strings.HasPrefix(locLower, base+" ") && strings.HasSuffix(locLower, " "+digit) {
+						ll := strings.ToLower(loc)
+						if strings.HasPrefix(ll, base+" ") && strings.HasSuffix(ll, " "+digit) {
 							return loc
 						}
 					}
@@ -101,21 +107,15 @@ func matchLocation(text string) string {
 		}
 	}
 
-	// Pass 1: exact substring match against known locations.
 	for _, loc := range knownLocations {
 		if strings.Contains(lower, strings.ToLower(loc)) {
-			// If the matched location has a trailing number, make sure the text
-			// isn't actually pointing at a different number. If so, skip.
 			if hasTrailingNumber(loc) {
-				// Only accept if the exact "base number" appears (already handled above),
-				// so this branch effectively means: reject and let fuzzy decide.
 				continue
 			}
 			return loc
 		}
 	}
 
-	// Pass 2: fuzzy on word windows of 1-3 words.
 	words := reWord.FindAllString(text, -1)
 	if len(words) == 0 {
 		return ""
@@ -123,17 +123,15 @@ func matchLocation(text string) string {
 
 	bestScore := 0.0
 	bestLoc := ""
-
 	for _, loc := range knownLocations {
-		// Skip numbered locations in fuzzy — they were handled in pass 0.
 		if hasTrailingNumber(loc) {
 			continue
 		}
-		locLower := strings.ToLower(loc)
+		ll := strings.ToLower(loc)
 		for windowSize := 1; windowSize <= 3; windowSize++ {
 			for i := 0; i+windowSize <= len(words); i++ {
 				candidate := strings.ToLower(strings.Join(words[i:i+windowSize], " "))
-				score := similarity(candidate, locLower)
+				score := similarity(candidate, ll)
 				if score > bestScore {
 					bestScore = score
 					bestLoc = loc
@@ -141,14 +139,64 @@ func matchLocation(text string) string {
 			}
 		}
 	}
-
 	if bestScore >= 0.80 {
 		return bestLoc
 	}
 	return ""
 }
 
-// hasTrailingNumber reports whether a location name ends with " <digit>".
+func extractLocationRaw(text string) string {
+	lines := strings.Split(text, "\n")
+
+	for _, line := range lines {
+		lineLower := strings.ToLower(line)
+		for _, marker := range locationMarkers {
+			if idx := strings.Index(lineLower, marker); idx >= 0 {
+				after := line[idx+len(marker):]
+				after = strings.TrimLeft(after, " :,-\t")
+				if len(after) > 2 {
+					return truncateLocation(after)
+				}
+			}
+		}
+	}
+
+	words := reWord.FindAllString(text, -1)
+	for i, w := range words {
+		wLower := strings.ToLower(w)
+		if len(wLower) < 4 || len(wLower) > 15 {
+			continue
+		}
+		for _, marker := range locationMarkers {
+			if strings.ContainsAny(marker, " .:") {
+				continue
+			}
+			score := similarity(wLower, marker)
+			if score >= 0.78 {
+				end := i + 6
+				if end > len(words) {
+					end = len(words)
+				}
+				candidate := strings.Join(words[i+1:end], " ")
+				if len(candidate) > 2 {
+					return truncateLocation(candidate)
+				}
+			}
+		}
+	}
+
+	return ""
+}
+
+func truncateLocation(s string) string {
+	s = strings.TrimSpace(s)
+	s = strings.TrimRight(s, " .,;:-")
+	if len(s) > 80 {
+		s = s[:80] + "…"
+	}
+	return s
+}
+
 func hasTrailingNumber(loc string) bool {
 	parts := strings.Fields(loc)
 	if len(parts) < 2 {
@@ -161,7 +209,6 @@ func hasTrailingNumber(loc string) bool {
 	return last[0] >= '0' && last[0] <= '9'
 }
 
-// similarity returns 1.0 for identical strings, 0.0 for completely different.
 func similarity(a, b string) float64 {
 	if a == b {
 		return 1.0
@@ -226,6 +273,7 @@ func ParseListing(msgID, chatName, chatJID, timestamp, sender, senderJID, text, 
 	}
 
 	l.Location = matchLocation(clean)
+	l.LocationRaw = extractLocationRaw(clean)
 
 	if m := rePhone.FindString(clean); m != "" {
 		l.Phone = strings.ReplaceAll(strings.ReplaceAll(m, " ", ""), "-", "")
@@ -256,6 +304,14 @@ func classify(text string) string {
 	}
 	if hasSale {
 		return "sale"
+	}
+	// Structural fallback: typology + price are the strongest co-occurring
+	// signals for a listing without an explicit verb.
+	hasTypology := reTypology.MatchString(text)
+	hasPrice := rePriceK.MatchString(text) || rePriceNum.MatchString(text)
+
+	if hasTypology && hasPrice {
+		return "rental"
 	}
 	return "noise"
 }

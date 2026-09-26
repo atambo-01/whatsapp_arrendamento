@@ -8,6 +8,7 @@ import (
 	"log"
 	"net/http"
 	"os/exec"
+	"strings"
 
 	_ "modernc.org/sqlite"
 )
@@ -27,6 +28,13 @@ type WacliMessage struct {
 	FromMe      bool   `json:"FromMe"`
 	Text        string `json:"Text"`
 	DisplayText string `json:"DisplayText"`
+}
+
+type WacliSearchResponse struct {
+	Success bool `json:"success"`
+	Data    struct {
+		Messages []WacliMessage `json:"messages"`
+	} `json:"data"`
 }
 
 type WacliResponse struct {
@@ -54,6 +62,7 @@ func main() {
 	http.HandleFunc("/api/listings", handleListings)
 	http.HandleFunc("/api/refresh", handleRefresh)
 	http.HandleFunc("/api/refresh/stream", handleRefreshStream)
+	http.HandleFunc("/api/sync-status", handleSyncStatus)
 
 	log.Println("Server running at http://localhost:8080")
 	log.Fatal(http.ListenAndServe(":8080", nil))
@@ -73,6 +82,7 @@ func initDB() error {
 			price INTEGER,
 			price_text TEXT,
 			location TEXT,
+			location_raw TEXT,
 			phone TEXT,
 			raw_text TEXT,
 			category TEXT
@@ -124,7 +134,7 @@ func handleListings(w http.ResponseWriter, r *http.Request) {
 		sortDir = "desc"
 	}
 
-	query := "SELECT msg_id, chat_name, chat_jid, timestamp, sender, sender_jid, title, typology, price, price_text, location, phone, raw_text, category FROM listings WHERE category = ?"
+	query := "SELECT msg_id, chat_name, chat_jid, timestamp, sender, sender_jid, title, typology, price, price_text, location, location_raw, phone, raw_text, category FROM listings WHERE category = ?"
 	args := []interface{}{category}
 
 	if typology != "" {
@@ -159,26 +169,27 @@ func handleListings(w http.ResponseWriter, r *http.Request) {
 	defer rows.Close()
 
 	type Row struct {
-		MsgID     string `json:"msg_id"`
-		ChatName  string `json:"chat_name"`
-		ChatJID   string `json:"chat_jid"`
-		Timestamp string `json:"timestamp"`
-		Sender    string `json:"sender"`
-		SenderJID string `json:"sender_jid"`
-		Title     string `json:"title"`
-		Typology  string `json:"typology"`
-		Price     int    `json:"price"`
-		PriceText string `json:"price_text"`
-		Location  string `json:"location"`
-		Phone     string `json:"phone"`
-		RawText   string `json:"raw_text"`
-		Category  string `json:"category"`
+		MsgID       string `json:"msg_id"`
+		ChatName    string `json:"chat_name"`
+		ChatJID     string `json:"chat_jid"`
+		Timestamp   string `json:"timestamp"`
+		Sender      string `json:"sender"`
+		SenderJID   string `json:"sender_jid"`
+		Title       string `json:"title"`
+		Typology    string `json:"typology"`
+		Price       int    `json:"price"`
+		PriceText   string `json:"price_text"`
+		Location    string `json:"location"`
+		LocationRaw string `json:"location_raw"`
+		Phone       string `json:"phone"`
+		RawText     string `json:"raw_text"`
+		Category    string `json:"category"`
 	}
 
 	var out []Row
 	for rows.Next() {
 		var r Row
-		rows.Scan(&r.MsgID, &r.ChatName, &r.ChatJID, &r.Timestamp, &r.Sender, &r.SenderJID, &r.Title, &r.Typology, &r.Price, &r.PriceText, &r.Location, &r.Phone, &r.RawText, &r.Category)
+		rows.Scan(&r.MsgID, &r.ChatName, &r.ChatJID, &r.Timestamp, &r.Sender, &r.SenderJID, &r.Title, &r.Typology, &r.Price, &r.PriceText, &r.Location, &r.LocationRaw, &r.Phone, &r.RawText, &r.Category)
 		out = append(out, r)
 	}
 	if out == nil {
@@ -213,9 +224,9 @@ func refreshOnce(kw string, seen map[string]bool) (inserted int, seenCount int, 
 
 		_, err := db.Exec(`
 			INSERT OR REPLACE INTO listings
-			(msg_id, chat_name, chat_jid, timestamp, sender, sender_jid, title, typology, price, price_text, location, phone, raw_text, category)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-		`, l.MsgID, l.ChatName, l.ChatJID, l.Timestamp, l.Sender, l.SenderJID, l.Title, l.Typology, l.Price, l.PriceText, l.Location, l.Phone, l.RawText, l.Category)
+			(msg_id, chat_name, chat_jid, timestamp, sender, sender_jid, title, typology, price, price_text, location, location_raw, phone, raw_text, category)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		`, l.MsgID, l.ChatName, l.ChatJID, l.Timestamp, l.Sender, l.SenderJID, l.Title, l.Typology, l.Price, l.PriceText, l.Location, l.LocationRaw, l.Phone, l.RawText, l.Category)
 		if err == nil {
 			inserted++
 		}
@@ -297,4 +308,45 @@ func handleRefreshStream(w http.ResponseWriter, r *http.Request) {
 		"counts": allCounts,
 		"message": "refresh complete",
 	})
+}
+
+// handleSyncStatus reports how fresh the local wacli-pro data is.
+func handleSyncStatus(w http.ResponseWriter, r *http.Request) {
+	result := map[string]string{}
+
+	// 1. Get message counts and auth status from `doctor`.
+	doctorCmd := exec.Command("wacli-pro", "doctor")
+	if output, err := doctorCmd.Output(); err == nil {
+		for _, line := range strings.Split(string(output), "\n") {
+			parts := strings.Fields(line)
+			if len(parts) >= 2 {
+				key := parts[0]
+				value := strings.Join(parts[1:], " ")
+				result[key] = value
+			}
+		}
+	} else {
+		result["error"] = err.Error()
+	}
+
+	// 2. Get the newest message timestamp by asking wacli-pro for one message.
+	listCmd := exec.Command("wacli-pro", "messages", "list", "--json", "--limit", "1")
+	if output, err := listCmd.Output(); err == nil {
+		var resp WacliResponse
+		if err := json.Unmarshal(output, &resp); err == nil && len(resp.Data.Messages) > 0 {
+			result["LAST_SYNC"] = resp.Data.Messages[0].Timestamp
+		}
+	}
+
+	// 3. Fallback: check our own listings.db for the newest captured listing.
+	if result["LAST_SYNC"] == "" {
+		var ts sql.NullString
+		_ = db.QueryRow(`SELECT MAX(timestamp) FROM listings`).Scan(&ts)
+		if ts.Valid {
+			result["LAST_SYNC"] = ts.String
+		}
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(result)
 }
