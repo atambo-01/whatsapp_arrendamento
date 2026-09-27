@@ -28,8 +28,11 @@ type Listing struct {
 
 var (
 	reRentalVerb = regexp.MustCompile(`(?i)(arrenda[\s\-]?se|arrendam[\s\-]?se|aluga[\s\-]?se|\barrendar\s*:|\bem arrendamento\b|\bpara aluguer\b|\bpara arrendar\b|\barrendamento\b)`)
-	reSeekerVerb = regexp.MustCompile(`(?i)(\bprocuro\b|\bprocura[\s\-]?se\b|\bpreciso (de|duma|dum)\b|\bestou a procura\b|\bquero uma\b|\bquero um\b|\balgu[eé]m tem\b|\bquem tem\b)`)
-	reSaleVerb   = regexp.MustCompile(`(?i)(\bvende[\s\-]?se\b|\bvendo\b|\bà venda\b|\bpara venda\b|\bvenda de\b)`)
+	// Seeker verbs: note the accent-tolerant "à/a" and the alternation on
+	// "estou (à|a|em) procura" — the previous version only matched the
+	// unaccented "a procura", which the seeder produces as "à procura".
+	reSeekerVerb = regexp.MustCompile(`(?i)(\bprocuro\b|\bprocuramos\b|\bprocura[\s\-]?se\b|\bpreciso (de|duma|dum)\b|\bestou (à|a|em)? ?procura\b|\bando à procura\b|\bquero uma\b|\bquero um\b|\balgu[eé]m tem\b|\bquem tem\b|\balgu[eé]m sabe\b)`)
+	reSaleVerb   = regexp.MustCompile(`(?i)(\bvende[\s\-]?se\b|\bvendo\b|\bvendemos\b|\bà venda\b|\bpara venda\b|\bvenda de\b|\bestá à venda\b)`)
 	reTypology   = regexp.MustCompile(`(?i)\b(T[\s\-]?[0-5]|V[\s\-]?[2-5]|duplex|apartamento|vivenda|moradia|quarto|residencial)\b`)
 	rePriceK     = regexp.MustCompile(`(?i)(\d{1,3}(?:[.,\s]\d{3})+|\d+)\s*(mil|kz|kzs|akz|aoa|kwanzas?)`)
 	rePriceNum   = regexp.MustCompile(`(?i)(?:plafond|pre[çc]o|valor|renda|plafon)\s*[:\-]?\s*(\d{1,3}(?:[.,\s]\d{3})*|\d+)\s*(mil)?`)
@@ -286,33 +289,49 @@ func ParseListing(msgID, chatName, chatJID, timestamp, sender, senderJID, text, 
 	return l
 }
 
+// classify decides a listing's category. Rules are tried in strict priority
+// order — the first match wins. Verbs in the title carry the strongest signal;
+// structural fallbacks (typology + price) only apply when no verb matches.
 func classify(text string) string {
 	lower := strings.ToLower(text)
 	head := lower
-	if len(head) > 80 {
-		head = head[:80]
+	if len(head) > 120 {
+		head = head[:120]
 	}
+
 	hasSeeker := reSeekerVerb.MatchString(head)
 	hasRental := reRentalVerb.MatchString(lower)
 	hasSale := reSaleVerb.MatchString(lower)
 
-	if hasRental && !hasSeeker {
-		return "rental"
-	}
+	// Priority 1: explicit seeker verb. This wins over everything else,
+	// including a rental or sale verb later in the same post, because the
+	// seeker verb sets the author's intent ("I'm looking for X"). This also
+	// handles the case where a seeker post quotes what they want
+	// ("procuro arrendamento...") without being misread as a rental ad.
 	if hasSeeker {
 		return "seeker"
 	}
+
+	// Priority 2: explicit sale verb. Sales are rarer than rentals, so if
+	// both appear, prefer sale (the seller usually leads with "vende-se").
 	if hasSale {
 		return "sale"
 	}
-	// Structural fallback: typology + price are the strongest co-occurring
-	// signals for a listing without an explicit verb.
+
+	// Priority 3: explicit rental verb.
+	if hasRental {
+		return "rental"
+	}
+
+	// Priority 4: structural fallback. Typology + price is a strong signal
+	// for a rental ad with no verb, but only if we didn't hit any of the
+	// above. This is last because it's the least reliable.
 	hasTypology := reTypology.MatchString(text)
 	hasPrice := rePriceK.MatchString(text) || rePriceNum.MatchString(text)
-
 	if hasTypology && hasPrice {
 		return "rental"
 	}
+
 	return "noise"
 }
 

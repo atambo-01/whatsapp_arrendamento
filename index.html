@@ -180,6 +180,7 @@ function renderSortIndicators() {
 }
 
 async function load() {
+  await loadCounts();
   if (refLatLng) {
     const params = new URLSearchParams();
     params.set('lat', refLatLng.lat);
@@ -255,8 +256,16 @@ function fmtDistance(km) {
 function render(rows, opts) {
   opts = opts || {};
   const prox = !!opts.proximity;
-  document.getElementById('stats').textContent =
-    rows.length + ' ' + currentCat + (prox ? ' · sorted by distance' : '');
+  const shown = rows.length;
+  const total = (window.__counts && window.__counts[currentCat]) || shown;
+  const suffix = prox ? ' · sorted by distance' : '';
+  let text;
+  if (total > shown) {
+    text = 'Showing ' + shown + ' of ' + total + ' ' + currentCat + suffix;
+  } else {
+    text = shown + ' ' + currentCat + suffix;
+  }
+  document.getElementById('stats').textContent = text;
   if (!rows.length) {
     document.getElementById('content').innerHTML =
       '<div class="empty">Nothing here</div>';
@@ -483,9 +492,19 @@ async function refresh() {
   }
 }
 
+async function loadCounts() {
+  try {
+    const res = await fetch('/api/counts');
+    window.__counts = await res.json();
+  } catch (e) {
+    window.__counts = {};
+  }
+}
+
 (async function() {
   loadSyncStatus();
   setInterval(loadSyncStatus, 60000);
+  await loadCounts();
   try {
     const res = await fetch('/api/listings?category=rental');
     const rows = await res.json();

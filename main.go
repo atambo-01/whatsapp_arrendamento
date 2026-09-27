@@ -8,6 +8,7 @@ import (
 	"log"
 	"math"
 	"net/http"
+	"os"
 	"os/exec"
 	"sort"
 	"strconv"
@@ -73,12 +74,21 @@ var parentLocation = map[string]string{
 }
 
 func main() {
+	dbPath := os.Getenv("LISTINGS_DB")
+	if dbPath == "" {
+		dbPath = "listings.db"
+	}
+	port := os.Getenv("PORT")
+	if port == "" {
+		port = "8090"
+	}
 	var err error
-	db, err = sql.Open("sqlite", "listings.db")
+	db, err = sql.Open("sqlite", dbPath)
 	if err != nil {
 		log.Fatal(err)
 	}
 	defer db.Close()
+	log.Printf("using database: %s", dbPath)
 
 	if err := initDB(); err != nil {
 		log.Fatal(err)
@@ -90,9 +100,11 @@ func main() {
 	http.HandleFunc("/api/refresh", handleRefresh)
 	http.HandleFunc("/api/refresh/stream", handleRefreshStream)
 	http.HandleFunc("/api/sync-status", handleSyncStatus)
+	http.HandleFunc("/api/parse-audit", handleParseAudit)
+	http.HandleFunc("/api/counts", handleCounts)
 
-	log.Println("Server running at http://localhost:8090")
-	log.Fatal(http.ListenAndServe(":8090", nil))
+	log.Printf("Server running at http://localhost:%s", port)
+	log.Fatal(http.ListenAndServe(":"+port, nil))
 }
 
 func initDB() error {
@@ -126,6 +138,9 @@ func initDB() error {
 func handleIndex(w http.ResponseWriter, r *http.Request) {
 	data, _ := indexFS.ReadFile("index.html")
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
+	w.Header().Set("Pragma", "no-cache")
+	w.Header().Set("Expires", "0")
 	w.Write(data)
 }
 
@@ -231,6 +246,7 @@ func handleListings(w http.ResponseWriter, r *http.Request) {
 		out = []Row{}
 	}
 	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Cache-Control", "no-store")
 	json.NewEncoder(w).Encode(out)
 }
 
@@ -359,6 +375,7 @@ func handleNearby(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Cache-Control", "no-store")
 	json.NewEncoder(w).Encode(out)
 }
 
@@ -412,6 +429,7 @@ func handleRefresh(w http.ResponseWriter, r *http.Request) {
 	}
 	log.Printf("refresh done: inserted=%d, unique=%d, counts=%v", total, len(seen), allCounts)
 	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Cache-Control", "no-store")
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"inserted":     total,
 		"total_unique": len(seen),
@@ -478,6 +496,17 @@ func handleRefreshStream(w http.ResponseWriter, r *http.Request) {
 func handleSyncStatus(w http.ResponseWriter, r *http.Request) {
 	result := map[string]string{}
 
+	if dbPath := os.Getenv("LISTINGS_DB"); dbPath != "" {
+		result["DB_PATH"] = dbPath
+	} else {
+		result["DB_PATH"] = "listings.db (default)"
+	}
+	if port := os.Getenv("PORT"); port != "" {
+		result["PORT"] = port
+	} else {
+		result["PORT"] = "8090 (default)"
+	}
+
 	doctorCmd := exec.Command("wacli-pro", "doctor")
 	if output, err := doctorCmd.Output(); err == nil {
 		for _, line := range strings.Split(string(output), "\n") {
@@ -509,5 +538,118 @@ func handleSyncStatus(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Cache-Control", "no-store")
 	json.NewEncoder(w).Encode(result)
+}
+
+// ---------- Parse audit ----------
+
+// handleParseAudit re-runs the parser against every stored raw_text and reports
+// rows where the current parser disagrees with the category stored at insert
+// time. Used to find misclassification bugs. With the seeded dev DB, the
+// stored category is ground truth, so any mismatch is a real parser error.
+func handleParseAudit(w http.ResponseWriter, r *http.Request) {
+	category := r.URL.Query().Get("category")
+	if category == "" {
+		category = "rental"
+	}
+	limit := 5000
+	if s := r.URL.Query().Get("limit"); s != "" {
+		if n, err := strconv.Atoi(s); err == nil && n > 0 {
+			limit = n
+		}
+	}
+
+	rows, err := db.Query(`
+		SELECT msg_id, chat_name, chat_jid, timestamp, sender, sender_jid,
+		       title, typology, price, price_text, location, location_raw,
+		       phone, raw_text, category
+		FROM listings WHERE category = ? LIMIT ?`, category, limit)
+	if err != nil {
+		http.Error(w, err.Error(), 500)
+		return
+	}
+	defer rows.Close()
+
+	type Audit struct {
+		MsgID    string `json:"msg_id"`
+		Stored   string `json:"stored"`
+		Reparsed string `json:"reparsed"`
+		RawText  string `json:"raw_text"`
+	}
+
+	var mismatches []Audit
+	var total int
+
+	for rows.Next() {
+		var (
+			msgID, chatName, chatJID, timestamp, sender, senderJID string
+			title, typology, priceText, location, locationRaw      string
+			phone, rawText, stored                                 string
+			price                                                  int
+		)
+		if err := rows.Scan(&msgID, &chatName, &chatJID, &timestamp, &sender, &senderJID,
+			&title, &typology, &price, &priceText, &location, &locationRaw,
+			&phone, &rawText, &stored); err != nil {
+			continue
+		}
+		total++
+
+		reparsed := ParseListing(msgID, chatName, chatJID, timestamp, sender,
+			senderJID, rawText, "").Category
+
+		if reparsed != stored {
+			mismatches = append(mismatches, Audit{
+				MsgID:    msgID,
+				Stored:   stored,
+				Reparsed: reparsed,
+				RawText:  rawText,
+			})
+		}
+	}
+
+	rate := 0.0
+	if total > 0 {
+		rate = float64(len(mismatches)) / float64(total)
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Cache-Control", "no-store")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"category":   category,
+		"total":      total,
+		"mismatches": len(mismatches),
+		"rate":       rate,
+		"samples":    mismatches,
+	})
+}
+
+// ---------- Counts ----------
+
+// handleCounts returns per-category totals plus a grand total. Used by the
+// frontend to display true counts even when /api/listings is capped at 500.
+func handleCounts(w http.ResponseWriter, r *http.Request) {
+	rows, err := db.Query(`SELECT category, COUNT(*) FROM listings GROUP BY category`)
+	if err != nil {
+		http.Error(w, err.Error(), 500)
+		return
+	}
+	defer rows.Close()
+
+	out := map[string]int{}
+	total := 0
+	for rows.Next() {
+		var c string
+		var n int
+		if err := rows.Scan(&c, &n); err != nil {
+			continue
+		}
+		out[c] = n
+		total += n
+	}
+	out["total"] = total
+
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Cache-Control", "no-store")
+	json.NewEncoder(w).Encode(out)
 }

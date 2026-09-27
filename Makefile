@@ -13,7 +13,10 @@ BLUE   := \033[0;34m
 BOLD   := \033[1m
 RESET  := \033[0m
 
-.PHONY: all build rebuild run restart stop start clean clean-db clean-all status logs doctor sync sync-stop sync-start backfill tidy fmt help
+.PHONY: all build rebuild rebuild-fresh run run-dev restart restart-svc stop start \
+        clean clean-db clean-all clean-dev status logs doctor \
+        sync sync-stop sync-start backfill tidy fmt help \
+        seed seed-large
 
 all: build
 
@@ -155,6 +158,22 @@ clean-db: ## Remove listings.db (forces full re-parse)
 
 clean-all: clean clean-db ## Remove binary and database
 	@printf "$(GREEN)  ✔ Full clean complete$(RESET)\n"
+
+# --- dev / seed ----------------------------------------------------------
+
+DEV_DB := listings.dev.db
+
+seed: ## Regenerate dev DB with exactly 100 listings per category
+	@printf "$(BOLD)>> Seeding $(DEV_DB)$(RESET)\n"
+	@go run ./seed -db $(DEV_DB)
+
+
+run-dev: build seed ## Build, seed dev DB, run server against it
+	@printf "$(BLUE)  → Running with LISTINGS_DB=$(DEV_DB)$(RESET)\n"
+	@LISTINGS_DB=$(DEV_DB) ./$(BIN)
+
+clean-dev: ## Remove the dev DB
+	@rm -f $(DEV_DB) && printf "$(GREEN)  ✔ Removed $(DEV_DB)$(RESET)\n"
 
 # --- help ----------------------------------------------------------------
 
