@@ -3,6 +3,8 @@
 <head>
 <meta charset="utf-8">
 <title>Casas para Arrendar</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <style>
   * { box-sizing: border-box; }
   body { font-family: system-ui, sans-serif; margin: 0; background: #f5f5f5; color: #222; }
@@ -50,6 +52,12 @@
     z-index: 1001;
   }
   #toast.show { opacity: 1; }
+  #mapWrap { display: none; padding: 16px 24px; background: white; border-bottom: 1px solid #ddd; }
+  #map { height: 360px; border-radius: 6px; }
+  .map-hint { margin-top: 8px; font-size: 13px; color: #555; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .map-hint button { padding: 4px 10px; font-size: 12px; background: #999; }
+  .dist-badge { display: inline-block; padding: 2px 6px; border-radius: 3px; background: #fff3e0; color: #b25c00; font-size: 12px; font-weight: 600; }
+  #mapToggle.active { background: #34a853; }
 </style>
 </head>
 <body>
@@ -91,6 +99,16 @@
   </select>
   <input type="number" id="minPrice" placeholder="Min Kz" oninput="debounceLoad()" style="width:120px">
   <input type="number" id="maxPrice" placeholder="Max Kz" oninput="debounceLoad()" style="width:120px">
+  <button id="mapToggle" onclick="toggleMap()" style="background:#1a73e8;">📍 Map</button>
+</div>
+
+<div id="mapWrap">
+  <div id="map"></div>
+  <div class="map-hint">
+    <span>Click the map to set a reference point.</span>
+    <span>Ref: <strong id="refPoint">none</strong></span>
+    <button onclick="clearRef()">Clear</button>
+  </div>
 </div>
 
 <div class="stats" id="stats"></div>
@@ -104,6 +122,10 @@ let currentCat = 'rental';
 let sortCol = 'timestamp';
 let sortDir = 'desc';
 
+let map = null;
+let marker = null;
+let refLatLng = null;
+
 function debounceLoad() { clearTimeout(timer); timer = setTimeout(load, 300); }
 
 function setCat(cat) {
@@ -113,6 +135,7 @@ function setCat(cat) {
 }
 
 function setSort(col) {
+  if (refLatLng) return;
   if (sortCol === col) {
     sortDir = sortDir === 'asc' ? 'desc' : 'asc';
   } else {
@@ -125,7 +148,7 @@ function setSort(col) {
 
 function syncDropdown() {
   const sel = document.getElementById('sortBy');
-  const target = `${sortCol}|${sortDir}`;
+  const target = sortCol + '|' + sortDir;
   if ([...sel.options].some(o => o.value === target)) {
     sel.value = target;
   } else {
@@ -134,11 +157,12 @@ function syncDropdown() {
 }
 
 function onDropdownChange() {
+  if (refLatLng) { syncDropdown(); return; }
   const val = document.getElementById('sortBy').value;
   if (!val) return;
-  const [c, d] = val.split('|');
-  sortCol = c;
-  sortDir = d;
+  const parts = val.split('|');
+  sortCol = parts[0];
+  sortDir = parts[1];
   load();
 }
 
@@ -146,7 +170,7 @@ function renderSortIndicators() {
   document.querySelectorAll('th').forEach(th => {
     const ind = th.querySelector('.sort-ind');
     if (ind) ind.remove();
-    if (th.dataset.col === sortCol) {
+    if (!refLatLng && th.dataset.col === sortCol) {
       const span = document.createElement('span');
       span.className = 'sort-ind';
       span.textContent = sortDir === 'asc' ? '▲' : '▼';
@@ -156,6 +180,20 @@ function renderSortIndicators() {
 }
 
 async function load() {
+  if (refLatLng) {
+    const params = new URLSearchParams();
+    params.set('lat', refLatLng.lat);
+    params.set('lng', refLatLng.lng);
+    params.set('category', currentCat);
+    const t = document.getElementById('typology').value;
+    if (t) params.set('typology', t);
+    const res = await fetch('/api/nearby?' + params.toString());
+    const rows = await res.json();
+    render(rows, { proximity: true });
+    renderSortIndicators();
+    return;
+  }
+
   const params = new URLSearchParams();
   params.set('category', currentCat);
   params.set('sort_col', sortCol);
@@ -169,7 +207,7 @@ async function load() {
   if (mn) params.set('min_price', mn);
   if (mx) params.set('max_price', mx);
 
-  const res = await fetch('/api/listings?' + params);
+  const res = await fetch('/api/listings?' + params.toString());
   const rows = await res.json();
   render(rows);
   renderSortIndicators();
@@ -198,7 +236,9 @@ async function copySearch(row) {
 
 function esc(s) {
   if (s == null) return '';
-  return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  return String(s).replace(/[&<>"']/g, function(c) {
+    return ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[c];
+  });
 }
 
 function titleOr(s, fallback) {
@@ -206,54 +246,83 @@ function titleOr(s, fallback) {
   return t ? esc(t) : '<span class="placeholder">' + fallback + '</span>';
 }
 
-function render(rows) {
-  document.getElementById('stats').textContent = rows.length + ' ' + currentCat;
+function fmtDistance(km) {
+  if (km == null) return '';
+  if (km < 1) return (km * 1000).toFixed(0) + ' m';
+  return km.toFixed(1) + ' km';
+}
+
+function render(rows, opts) {
+  opts = opts || {};
+  const prox = !!opts.proximity;
+  document.getElementById('stats').textContent =
+    rows.length + ' ' + currentCat + (prox ? ' · sorted by distance' : '');
   if (!rows.length) {
-    document.getElementById('content').innerHTML = '<div class="empty">Nothing here</div>';
+    document.getElementById('content').innerHTML =
+      '<div class="empty">Nothing here</div>';
     return;
   }
+
   const headers = [
-    { col: 'title', label: 'Title' },
-    { col: 'typology', label: 'Typology' },
-    { col: 'price', label: 'Price' },
-    { col: 'location', label: 'Location' },
-    { col: 'phone', label: 'Phone' },
+    { col: 'title',     label: 'Title' },
+    { col: 'typology',  label: 'Typology' },
+    { col: 'price',     label: 'Price' },
+    { col: 'location',  label: 'Location' },
+    { col: 'phone',     label: 'Phone' },
     { col: 'timestamp', label: 'Date' },
-    { col: 'chat_name', label: 'Source' },
+    { col: 'chat_name', label: 'Source' }
   ];
+  if (prox) headers.splice(1, 0, { col: 'distance', label: 'Distance' });
+
   let html = '<table><thead><tr>';
   html += '<th class="row-num">#</th>';
-  for (const h of headers) {
-    html += `<th data-col="${h.col}" onclick="setSort('${h.col}')">${h.label}</th>`;
+  for (let k = 0; k < headers.length; k++) {
+    const h = headers[k];
+    const clickable = !prox && h.col !== 'distance';
+    html += '<th data-col="' + h.col + '"' +
+            (clickable ? ' onclick="setSort(\'' + h.col + '\')"' : '') +
+            '>' + h.label + '</th>';
   }
   html += '<th>Actions</th></tr></thead><tbody>';
+
   for (let i = 0; i < rows.length; i++) {
     const r = rows[i];
-    const date = r.timestamp ? r.timestamp.slice(0,10) : '';
-    const price = r.price ? r.price.toLocaleString('pt-AO') + ' Kz' : (r.price_text || '—');
-    let locCell = '';
+    const date = r.timestamp ? r.timestamp.slice(0, 10) : '';
+    const price = r.price
+      ? r.price.toLocaleString('pt-AO') + ' Kz'
+      : (r.price_text || '—');
+
+    let locCell;
     if (r.location) {
-      locCell = `<div>${esc(r.location)}</div>`;
+      locCell = '<div>' + esc(r.location) + '</div>';
       if (r.location_raw && r.location_raw.toLowerCase() !== r.location.toLowerCase()) {
-        locCell += `<span class="loc-raw">${esc(r.location_raw)}</span>`;
+        locCell += '<span class="loc-raw">' + esc(r.location_raw) + '</span>';
       }
     } else if (r.location_raw) {
-      locCell = `<span class="loc-raw">${esc(r.location_raw)}</span>`;
+      locCell = '<span class="loc-raw">' + esc(r.location_raw) + '</span>';
     } else {
       locCell = '<span class="loc-raw">—</span>';
     }
-    html += `<tr>
-      <td class="row-num">${i + 1}</td>
-      <td class="title"><details><summary>${titleOr(r.title, '(sem título)')}</summary><pre>${esc(r.raw_text)}</pre></details></td>
-      <td>${r.typology ? '<span class="tag">'+esc(r.typology)+'</span>' : ''}</td>
-      <td class="price">${esc(price)}</td>
-      <td>${locCell}</td>
-      <td>${esc(r.phone)}</td>
-      <td>${esc(date)}</td>
-      <td>${esc(r.chat_name)}</td>
-      <td class="actions"><button class="copy-btn" onclick="copySearchByIndex(${i})">Find in WhatsApp</button></td>
-    </tr>`;
+
+    let distCell = '';
+    if (prox) {
+      distCell = '<td><span class="dist-badge">' + fmtDistance(r.distance_km) + '</span></td>';
+    }
+
+    html += '<tr>' +
+      '<td class="row-num">' + (i + 1) + '</td>' +
+      distCell +
+      '<td class="title"><details><summary>' + titleOr(r.title, '(sem título)') + '</summary><pre>' + esc(r.raw_text) + '</pre></details></td>' +
+      '<td>' + (r.typology ? '<span class="tag">' + esc(r.typology) + '</span>' : '') + '</td>' +
+      '<td class="price">' + esc(price) + '</td>' +
+      '<td>' + locCell + '</td>' +
+      '<td>' + esc(r.phone) + '</td>' +
+      '<td>' + esc(date) + '</td>' +
+      '<td>' + esc(r.chat_name) + '</td>' +
+      '<td class="actions"><button class="copy-btn" onclick="copySearchByIndex(' + i + ')">Find in WhatsApp</button></td>' +
+    '</tr>';
   }
+
   html += '</tbody></table>';
   document.getElementById('content').innerHTML = html;
   window.__rows = rows;
@@ -262,6 +331,55 @@ function render(rows) {
 function copySearchByIndex(i) {
   const row = window.__rows[i];
   if (row) copySearch(row);
+}
+
+function toggleMap() {
+  const wrap = document.getElementById('mapWrap');
+  const btn = document.getElementById('mapToggle');
+  const showing = wrap.style.display !== 'none';
+
+  if (showing) {
+    wrap.style.display = 'none';
+    btn.classList.remove('active');
+    clearRef();
+    return;
+  }
+
+  wrap.style.display = 'block';
+  btn.classList.add('active');
+  if (!map) initMap();
+  setTimeout(function() { map.invalidateSize(); }, 50);
+}
+
+function initMap() {
+  map = L.map('map').setView([-8.90, 13.25], 11);
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    maxZoom: 19,
+    attribution: '© OpenStreetMap contributors'
+  }).addTo(map);
+
+  map.on('click', function(e) {
+    refLatLng = e.latlng;
+    if (marker) {
+      marker.setLatLng(refLatLng);
+    } else {
+      marker = L.marker(refLatLng).addTo(map);
+    }
+    document.getElementById('refPoint').textContent =
+      refLatLng.lat.toFixed(4) + ', ' + refLatLng.lng.toFixed(4);
+    load();
+  });
+}
+
+function clearRef() {
+  refLatLng = null;
+  if (map && marker) {
+    map.removeLayer(marker);
+    marker = null;
+  }
+  const el = document.getElementById('refPoint');
+  if (el) el.textContent = 'none';
+  load();
 }
 
 async function loadSyncStatus() {
@@ -303,20 +421,20 @@ async function refresh() {
   fill.style.width = '0%';
 
   try {
-    await new Promise((resolve, reject) => {
-      fetch('/api/refresh/stream').then(resp => {
+    await new Promise(function(resolve, reject) {
+      fetch('/api/refresh/stream').then(function(resp) {
         const reader = resp.body.getReader();
         const decoder = new TextDecoder();
         let buffer = '';
 
         function pump() {
-          reader.read().then(({ done, value }) => {
-            if (done) { resolve(); return; }
-            buffer += decoder.decode(value, { stream: true });
+          reader.read().then(function(result) {
+            if (result.done) { resolve(); return; }
+            buffer += decoder.decode(result.value, { stream: true });
             const parts = buffer.split('\n\n');
             buffer = parts.pop();
-            for (const part of parts) {
-              const line = part.split('\n').find(l => l.startsWith('data: '));
+            for (let p = 0; p < parts.length; p++) {
+              const line = parts[p].split('\n').find(function(l) { return l.startsWith('data: '); });
               if (!line) continue;
               const ev = JSON.parse(line.slice(6));
               handleEvent(ev);
@@ -332,7 +450,11 @@ async function refresh() {
     await load();
     await loadSyncStatus();
     label.textContent = 'Done';
-    setTimeout(() => { wrap.classList.remove('active'); btn.textContent = 'Refresh from WhatsApp'; btn.disabled = false; }, 1500);
+    setTimeout(function() {
+      wrap.classList.remove('active');
+      btn.textContent = 'Refresh from WhatsApp';
+      btn.disabled = false;
+    }, 1500);
   } catch (e) {
     label.textContent = 'Error: ' + e;
     btn.textContent = 'Refresh from WhatsApp';
@@ -340,25 +462,28 @@ async function refresh() {
   }
 
   function handleEvent(ev) {
+    const c = ev.counts || {};
     if (ev.type === 'start') {
-      label.textContent = `0/${ev.total} — starting…`;
+      label.textContent = '0/' + ev.total + ' — starting…';
       fill.style.width = '0%';
     } else if (ev.type === 'step') {
-      label.textContent = `${ev.index + 1}/${ev.total} — searching "${ev.keyword}"…`;
+      label.textContent = (ev.index + 1) + '/' + ev.total + ' — searching "' + ev.keyword + '"…';
     } else if (ev.type === 'step_done') {
       const pct = ((ev.index + 1) / ev.total) * 100;
       fill.style.width = pct + '%';
-      const c = ev.counts || {};
-      label.textContent = `${ev.index + 1}/${ev.total} — rentals:${c.rental||0} seek:${c.seeker||0} sale:${c.sale||0} noise:${c.noise||0}`;
+      label.textContent = (ev.index + 1) + '/' + ev.total +
+        ' — rentals:' + (c.rental||0) + ' seek:' + (c.seeker||0) +
+        ' sale:' + (c.sale||0) + ' noise:' + (c.noise||0);
     } else if (ev.type === 'done') {
       fill.style.width = '100%';
-      const c = ev.counts || {};
-      label.textContent = `Done — rentals:${c.rental||0} seek:${c.seeker||0} sale:${c.sale||0} noise:${c.noise||0}`;
+      label.textContent = 'Done — rentals:' + (c.rental||0) +
+        ' seek:' + (c.seeker||0) + ' sale:' + (c.sale||0) +
+        ' noise:' + (c.noise||0);
     }
   }
 }
 
-(async () => {
+(async function() {
   loadSyncStatus();
   setInterval(loadSyncStatus, 60000);
   try {

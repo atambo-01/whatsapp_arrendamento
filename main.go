@@ -6,8 +6,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"math"
 	"net/http"
 	"os/exec"
+	"sort"
+	"strconv"
 	"strings"
 
 	_ "modernc.org/sqlite"
@@ -46,6 +49,29 @@ type WacliResponse struct {
 
 var searchKeywords = []string{"arrendar", "arrenda", "aluguer", "alugar", "renda", "plafond", "vende"}
 
+// parentLocation rolls up numbered variants (Zango 1..5, Golf 1..2, Camama 1..4, ...)
+// onto a base location that exists in coords.go, so the proximity view doesn't
+// silently drop listings whose exact neighborhood isn't geocoded.
+var parentLocation = map[string]string{
+	"Zango 0": "Zango", "Zango 1": "Zango", "Zango 2": "Zango",
+	"Zango 3": "Zango", "Zango 4": "Zango", "Zango 5": "Zango",
+	"Golf 1":  "Golf 2", "Golfe 1": "Golf 2", "Golfo 2": "Golf 2", "Golfe 2": "Golf 2",
+	"Camama 1": "Camama", "Camama 2": "Camama",
+	"Camama 3": "Camama", "Camama 4": "Camama",
+	"Kilamba Kiaxi":   "Kilamba",
+	"Ilha do Cabo":    "Ilha de Luanda",
+	"Futungo de Belas": "Futungo",
+	"Lar do Patriota": "Patriota",
+	"Mártires do Kifangondo": "Samba",
+	"Mártires de Kifangondo": "Samba",
+	"Vila Alice":      "Vila Flor",
+	"Vila Estoril":    "Cassequel",
+	"Bairro Operário": "Maianga",
+	"Bairro Azul":     "Maianga",
+	"Bairro das Tendas": "Rangel",
+	"Tala-Alice":      "Tala Hady",
+}
+
 func main() {
 	var err error
 	db, err = sql.Open("sqlite", "listings.db")
@@ -60,6 +86,7 @@ func main() {
 
 	http.HandleFunc("/", handleIndex)
 	http.HandleFunc("/api/listings", handleListings)
+	http.HandleFunc("/api/nearby", handleNearby)
 	http.HandleFunc("/api/refresh", handleRefresh)
 	http.HandleFunc("/api/refresh/stream", handleRefreshStream)
 	http.HandleFunc("/api/sync-status", handleSyncStatus)
@@ -146,12 +173,16 @@ func handleListings(w http.ResponseWriter, r *http.Request) {
 		args = append(args, location)
 	}
 	if minPrice != "" {
-		query += " AND price >= ?"
-		args = append(args, minPrice)
+		if n, err := strconv.Atoi(minPrice); err == nil {
+			query += " AND price >= ?"
+			args = append(args, n)
+		}
 	}
 	if maxPrice != "" {
-		query += " AND price <= ?"
-		args = append(args, maxPrice)
+		if n, err := strconv.Atoi(maxPrice); err == nil {
+			query += " AND price <= ?"
+			args = append(args, n)
+		}
 	}
 	if search != "" {
 		query += " AND (raw_text LIKE ? OR title LIKE ?)"
@@ -202,6 +233,136 @@ func handleListings(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(out)
 }
+
+// ---------- Proximity ----------
+
+func haversineKm(lat1, lon1, lat2, lon2 float64) float64 {
+	const R = 6371.0
+	dLat := (lat2 - lat1) * math.Pi / 180
+	dLon := (lon2 - lon1) * math.Pi / 180
+	a := math.Sin(dLat/2)*math.Sin(dLat/2) +
+		math.Cos(lat1*math.Pi/180)*math.Cos(lat2*math.Pi/180)*
+			math.Sin(dLon/2)*math.Sin(dLon/2)
+	c := 2 * math.Atan2(math.Sqrt(a), math.Sqrt(1-a))
+	return R * c
+}
+
+func resolveCoords(location, locationRaw string) (lat, lng float64, ok bool) {
+	key := location
+	if p, exists := parentLocation[key]; exists {
+		key = p
+	}
+	if c, exists := locationCoords[key]; exists {
+		return c[0], c[1], true
+	}
+	// Fallback: try to normalize from raw text via the existing matcher.
+	if locationRaw != "" {
+		if loc := matchLocation(locationRaw); loc != "" {
+			if p, exists := parentLocation[loc]; exists {
+				loc = p
+			}
+			if c, exists := locationCoords[loc]; exists {
+				return c[0], c[1], true
+			}
+		}
+	}
+	return 0, 0, false
+}
+
+func handleNearby(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	latStr, lngStr := q.Get("lat"), q.Get("lng")
+	if latStr == "" || lngStr == "" {
+		http.Error(w, "lat/lng required", 400)
+		return
+	}
+	lat, err1 := strconv.ParseFloat(latStr, 64)
+	lng, err2 := strconv.ParseFloat(lngStr, 64)
+	if err1 != nil || err2 != nil {
+		http.Error(w, "invalid lat/lng", 400)
+		return
+	}
+
+	maxKm := 0.0
+	if s := q.Get("max_km"); s != "" {
+		maxKm, _ = strconv.ParseFloat(s, 64)
+	}
+	category := q.Get("category")
+	if category == "" {
+		category = "rental"
+	}
+	typology := q.Get("typology")
+
+	query := `SELECT msg_id, chat_name, timestamp, sender, title, typology,
+	                 price, price_text, location, location_raw, phone, raw_text, category
+	          FROM listings WHERE category = ?`
+	args := []interface{}{category}
+	if typology != "" {
+		query += " AND typology = ?"
+		args = append(args, typology)
+	}
+
+	rows, err := db.Query(query, args...)
+	if err != nil {
+		http.Error(w, err.Error(), 500)
+		return
+	}
+	defer rows.Close()
+
+	type Row struct {
+		MsgID       string  `json:"msg_id"`
+		ChatName    string  `json:"chat_name"`
+		Timestamp   string  `json:"timestamp"`
+		Sender      string  `json:"sender"`
+		Title       string  `json:"title"`
+		Typology    string  `json:"typology"`
+		Price       int     `json:"price"`
+		PriceText   string  `json:"price_text"`
+		Location    string  `json:"location"`
+		LocationRaw string  `json:"location_raw"`
+		Phone       string  `json:"phone"`
+		RawText     string  `json:"raw_text"`
+		Category    string  `json:"category"`
+		DistanceKm  float64 `json:"distance_km"`
+		Lat         float64 `json:"lat"`
+		Lng         float64 `json:"lng"`
+	}
+
+	var out []Row
+	for rows.Next() {
+		var r Row
+		rows.Scan(&r.MsgID, &r.ChatName, &r.Timestamp, &r.Sender, &r.Title,
+			&r.Typology, &r.Price, &r.PriceText, &r.Location, &r.LocationRaw,
+			&r.Phone, &r.RawText, &r.Category)
+
+		clat, clng, ok := resolveCoords(r.Location, r.LocationRaw)
+		if !ok {
+			continue
+		}
+		r.Lat, r.Lng = clat, clng
+		r.DistanceKm = haversineKm(lat, lng, clat, clng)
+		if maxKm > 0 && r.DistanceKm > maxKm {
+			continue
+		}
+		out = append(out, r)
+	}
+
+	sort.Slice(out, func(i, j int) bool {
+		return out[i].DistanceKm < out[j].DistanceKm
+	})
+
+	if len(out) > 500 {
+		out = out[:500]
+	}
+	if out == nil {
+		out = []Row{}
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(out)
+}
+
+// ---------- Refresh ----------
 
 func refreshOnce(kw string, seen map[string]bool) (inserted int, seenCount int, counts map[string]int) {
 	counts = map[string]int{"rental": 0, "seeker": 0, "sale": 0, "noise": 0}
