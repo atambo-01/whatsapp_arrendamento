@@ -58,6 +58,21 @@
   .map-hint button { padding: 4px 10px; font-size: 12px; background: #999; }
   .dist-badge { display: inline-block; padding: 2px 6px; border-radius: 3px; background: #fff3e0; color: #b25c00; font-size: 12px; font-weight: 600; }
   #mapToggle.active { background: #34a853; }
+  .geosearch { position: relative; display: flex; gap: 8px; align-items: center; width: 100%; }
+  .geosearch input { flex: 1; padding: 8px 10px; border: 1px solid #ccc; border-radius: 4px; font-size: 14px; }
+  .geosearch .status { font-size: 12px; color: #666; white-space: nowrap; min-width: 90px; text-align: right; }
+  .geosearch .results {
+    position: absolute; top: 100%; left: 0; right: 0; z-index: 500;
+    background: white; border: 1px solid #ccc; border-radius: 4px;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.12);
+    max-height: 260px; overflow-y: auto; display: none;
+  }
+  .geosearch .results.show { display: block; }
+  .geosearch .result-item { padding: 8px 12px; cursor: pointer; font-size: 13px; border-bottom: 1px solid #eee; }
+  .geosearch .result-item:last-child { border-bottom: none; }
+  .geosearch .result-item:hover, .geosearch .result-item.active { background: #eef2f7; }
+  .geosearch .result-item .primary { color: #222; }
+  .geosearch .result-item .secondary { color: #888; font-size: 11px; margin-top: 2px; }
 </style>
 </head>
 <body>
@@ -103,9 +118,14 @@
 </div>
 
 <div id="mapWrap">
+  <div class="geosearch" style="margin-bottom:12px;">
+    <input type="text" id="geoSearch" placeholder="Search a landmark, neighborhood, or address (e.g. Belas Shopping)" autocomplete="off">
+    <span class="status" id="geoStatus"></span>
+    <div class="results" id="geoResults"></div>
+  </div>
   <div id="map"></div>
   <div class="map-hint">
-    <span>Click the map to set a reference point.</span>
+    <span>Click the map or search above to set a reference point.</span>
     <span>Ref: <strong id="refPoint">none</strong></span>
     <button onclick="clearRef()">Clear</button>
   </div>
@@ -125,6 +145,10 @@ let sortDir = 'desc';
 let map = null;
 let marker = null;
 let refLatLng = null;
+
+let geoDebounce = null;
+let geoResults = [];
+let geoActiveIndex = -1;
 
 function debounceLoad() { clearTimeout(timer); timer = setTimeout(load, 300); }
 
@@ -180,7 +204,6 @@ function renderSortIndicators() {
 }
 
 async function load() {
-  await loadCounts();
   if (refLatLng) {
     const params = new URLSearchParams();
     params.set('lat', refLatLng.lat);
@@ -258,14 +281,16 @@ function render(rows, opts) {
   const prox = !!opts.proximity;
   const shown = rows.length;
   const total = (window.__counts && window.__counts[currentCat]) || shown;
-  const suffix = prox ? ' · sorted by distance' : '';
   let text;
-  if (total > shown) {
-    text = 'Showing ' + shown + ' of ' + total + ' ' + currentCat + suffix;
+  if (prox) {
+    text = shown + ' ' + currentCat + ' · sorted by distance';
+  } else if (total > shown) {
+    text = 'Showing ' + shown + ' of ' + total + ' ' + currentCat;
   } else {
-    text = shown + ' ' + currentCat + suffix;
+    text = shown + ' ' + currentCat;
   }
   document.getElementById('stats').textContent = text;
+
   if (!rows.length) {
     document.getElementById('content').innerHTML =
       '<div class="empty">Nothing here</div>';
@@ -342,6 +367,8 @@ function copySearchByIndex(i) {
   if (row) copySearch(row);
 }
 
+// ---------- Map ----------
+
 function toggleMap() {
   const wrap = document.getElementById('mapWrap');
   const btn = document.getElementById('mapToggle');
@@ -368,16 +395,25 @@ function initMap() {
   }).addTo(map);
 
   map.on('click', function(e) {
-    refLatLng = e.latlng;
-    if (marker) {
-      marker.setLatLng(refLatLng);
-    } else {
-      marker = L.marker(refLatLng).addTo(map);
-    }
-    document.getElementById('refPoint').textContent =
-      refLatLng.lat.toFixed(4) + ', ' + refLatLng.lng.toFixed(4);
-    load();
+    setRefPoint(e.latlng.lat, e.latlng.lng, null);
   });
+}
+
+// setRefPoint drops the marker, updates the label, and reloads the table.
+// `label` is optional and used by geosearch to show a human-readable name.
+function setRefPoint(lat, lng, label) {
+  if (!map) return;
+  refLatLng = L.latLng(lat, lng);
+  if (marker) {
+    marker.setLatLng(refLatLng);
+  } else {
+    marker = L.marker(refLatLng).addTo(map);
+  }
+  const el = document.getElementById('refPoint');
+  el.textContent = label
+    ? label + ' (' + lat.toFixed(4) + ', ' + lng.toFixed(4) + ')'
+    : lat.toFixed(4) + ', ' + lng.toFixed(4);
+  load();
 }
 
 function clearRef() {
@@ -388,8 +424,143 @@ function clearRef() {
   }
   const el = document.getElementById('refPoint');
   if (el) el.textContent = 'none';
+  const inp = document.getElementById('geoSearch');
+  if (inp) inp.value = '';
+  hideGeoResults();
   load();
 }
+
+// ---------- Geosearch (Nominatim) ----------
+
+function hideGeoResults() {
+  const box = document.getElementById('geoResults');
+  if (box) { box.classList.remove('show'); box.innerHTML = ''; }
+  geoResults = [];
+  geoActiveIndex = -1;
+}
+
+function renderGeoResults() {
+  const box = document.getElementById('geoResults');
+  if (!geoResults.length) { hideGeoResults(); return; }
+  let html = '';
+  for (let i = 0; i < geoResults.length; i++) {
+    const r = geoResults[i];
+    const cls = 'result-item' + (i === geoActiveIndex ? ' active' : '');
+    html += '<div class="' + cls + '" onclick="pickGeoResult(' + i + ')">' +
+      '<div class="primary">' + esc(r.primary) + '</div>' +
+      (r.secondary ? '<div class="secondary">' + esc(r.secondary) + '</div>' : '') +
+      '</div>';
+  }
+  box.innerHTML = html;
+  box.classList.add('show');
+}
+
+function pickGeoResult(i) {
+  const r = geoResults[i];
+  if (!r) return;
+  if (map) {
+    map.setView([r.lat, r.lng], 15);
+  }
+  setRefPoint(r.lat, r.lng, r.primary);
+  document.getElementById('geoSearch').value = r.primary;
+  hideGeoResults();
+}
+
+// Nominatim returns a display_name with lots of comma-separated parts.
+// Split the first part off as the primary label, keep the rest as secondary.
+function splitNominatimName(displayName) {
+  const parts = (displayName || '').split(',').map(s => s.trim());
+  if (parts.length <= 1) return { primary: displayName || '', secondary: '' };
+  return {
+    primary: parts[0],
+    secondary: parts.slice(1).join(', ')
+  };
+}
+
+async function geosearch(query) {
+  const status = document.getElementById('geoStatus');
+  if (!query || query.length < 3) { hideGeoResults(); status.textContent = ''; return; }
+  status.textContent = 'Searching…';
+  try {
+    // bbox restricts to greater Luanda so results are locally relevant.
+    // viewbox = left,top,right,bottom (west,north,east,south)
+    const url = 'https://nominatim.openstreetmap.org/search'
+      + '?format=json'
+      + '&limit=6'
+      + '&addressdetails=0'
+      + '&viewbox=13.10,-8.75,13.55,-9.25'
+      + '&bounded=1'
+      + '&q=' + encodeURIComponent(query);
+    const res = await fetch(url, {
+      headers: { 'Accept': 'application/json' }
+    });
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const data = await res.json();
+    geoResults = data.map(d => {
+      const parts = splitNominatimName(d.display_name);
+      return {
+        primary: parts.primary,
+        secondary: parts.secondary,
+        lat: parseFloat(d.lat),
+        lng: parseFloat(d.lon)
+      };
+    });
+    status.textContent = geoResults.length ? geoResults.length + ' result' + (geoResults.length === 1 ? '' : 's') : 'No results';
+    renderGeoResults();
+  } catch (e) {
+    status.textContent = 'Search failed';
+    hideGeoResults();
+  }
+}
+
+// Wire up the geosearch input once the DOM is ready.
+function wireGeoSearch() {
+  const inp = document.getElementById('geoSearch');
+  if (!inp) return;
+
+  inp.addEventListener('input', function() {
+    clearTimeout(geoDebounce);
+    const q = inp.value.trim();
+    geoDebounce = setTimeout(function() { geosearch(q); }, 400);
+  });
+
+  inp.addEventListener('keydown', function(e) {
+    if (!geoResults.length) {
+      if (e.key === 'Enter') {
+        // Immediate search on Enter if no results yet
+        clearTimeout(geoDebounce);
+        geosearch(inp.value.trim());
+      }
+      return;
+    }
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      geoActiveIndex = Math.min(geoActiveIndex + 1, geoResults.length - 1);
+      renderGeoResults();
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      geoActiveIndex = Math.max(geoActiveIndex - 1, 0);
+      renderGeoResults();
+    } else if (e.key === 'Enter') {
+      e.preventDefault();
+      if (geoActiveIndex >= 0 && geoActiveIndex < geoResults.length) {
+        pickGeoResult(geoActiveIndex);
+      } else if (geoResults.length > 0) {
+        pickGeoResult(0);
+      }
+    } else if (e.key === 'Escape') {
+      hideGeoResults();
+    }
+  });
+
+  // Close dropdown when clicking outside
+  document.addEventListener('click', function(e) {
+    const wrap = document.querySelector('.geosearch');
+    if (wrap && !wrap.contains(e.target)) hideGeoResults();
+  });
+}
+
+// ---------- Sync status ----------
 
 async function loadSyncStatus() {
   const el = document.getElementById('syncStatus');
@@ -405,7 +576,9 @@ async function loadSyncStatus() {
       else if (mins < 1440) label = Math.floor(mins / 60) + 'h ago';
       else label = Math.floor(mins / 1440) + 'd ago';
       el.textContent = 'Sync: ' + label;
-      el.title = 'Last sync: ' + data.LAST_SYNC + ' | ' + (data.MESSAGES || '?') + ' messages';
+      el.title = 'Last sync: ' + data.LAST_SYNC +
+                 ' | DB: ' + (data.DB_PATH || '?') +
+                 ' | Port: ' + (data.PORT || '?');
     } else if (data.error) {
       el.textContent = 'Sync: offline';
       el.title = data.error;
@@ -416,6 +589,8 @@ async function loadSyncStatus() {
     el.textContent = 'Sync: error';
   }
 }
+
+// ---------- Refresh (SSE) ----------
 
 async function refresh() {
   const btn = document.getElementById('refreshBtn');
@@ -456,6 +631,7 @@ async function refresh() {
       }).catch(reject);
     });
 
+    await loadCounts();
     await load();
     await loadSyncStatus();
     label.textContent = 'Done';
@@ -492,6 +668,8 @@ async function refresh() {
   }
 }
 
+// ---------- Boot ----------
+
 async function loadCounts() {
   try {
     const res = await fetch('/api/counts');
@@ -502,6 +680,7 @@ async function loadCounts() {
 }
 
 (async function() {
+  wireGeoSearch();
   loadSyncStatus();
   setInterval(loadSyncStatus, 60000);
   await loadCounts();
