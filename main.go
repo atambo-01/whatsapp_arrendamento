@@ -6,12 +6,13 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strings"
 
 	_ "modernc.org/sqlite"
 )
 
-//go:embed index.html
-var indexFS embed.FS
+//go:embed web
+var webFS embed.FS
 
 var db *sql.DB
 
@@ -106,8 +107,25 @@ func initDB() error {
 }
 
 func handleIndex(w http.ResponseWriter, r *http.Request) {
-	data, _ := indexFS.ReadFile("index.html")
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	// Serve static files from the embedded web/ directory.
+	// "/" maps to web/index.html implicitly.
+	path := strings.TrimPrefix(r.URL.Path, "/")
+	if path == "" {
+		path = "index.html"
+	}
+	data, err := webFS.ReadFile("web/" + path)
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	switch {
+	case strings.HasSuffix(path, ".css"):
+		w.Header().Set("Content-Type", "text/css; charset=utf-8")
+	case strings.HasSuffix(path, ".js"):
+		w.Header().Set("Content-Type", "application/javascript; charset=utf-8")
+	default:
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	}
 	w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
 	w.Header().Set("Pragma", "no-cache")
 	w.Header().Set("Expires", "0")

@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="pt">
+<head>
+<meta charset="utf-8">
+<title>Casas para Arrendar</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+<link rel="stylesheet" href="/style.css"/>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+</head>
+<body>
+<header>
+  <h1>🏠 Casas para Arrendar</h1>
+  <div class="progress" id="progress">
+    <div class="progress-label" id="progressLabel">Starting…</div>
+    <div class="bar"><div class="bar-fill" id="barFill"></div></div>
+  </div>
+  <div id="syncStatus">Sync: —</div>
+  <button id="refreshBtn" onclick="refresh()">Refresh from WhatsApp</button>
+</header>
+
+<div class="tabs">
+  <div class="tab active" data-cat="rental" onclick="setCat('rental')">Rentals</div>
+  <div class="tab" data-cat="seeker" onclick="setCat('seeker')">Seekers</div>
+  <div class="tab" data-cat="sale" onclick="setCat('sale')">Sales</div>
+  <div class="tab" data-cat="noise" onclick="setCat('noise')">Noise</div>
+</div>
+
+<div class="filters">
+  <input type="text" id="q" placeholder="Search title or text..." oninput="debounceLoad()">
+  <select id="typology" onchange="load()">
+    <option value="">All typologies</option>
+    <option>T0</option><option>T1</option><option>T2</option>
+    <option>T3</option><option>T4</option><option>T5</option>
+    <option>V2</option><option>V3</option><option>V4</option><option>V5</option>
+    <option>APARTAMENTO</option><option>VIVENDA</option><option>MORADIA</option>
+    <option>QUARTO</option><option>DUPLEX</option>
+  </select>
+  <select id="sortBy" onchange="onDropdownChange()">
+    <option value="timestamp|desc">Newest first</option>
+    <option value="timestamp|asc">Oldest first</option>
+    <option value="price|asc">Price: low → high</option>
+    <option value="price|desc">Price: high → low</option>
+    <option value="location|asc">Location A → Z</option>
+    <option value="typology|asc">Typology A → Z</option>
+    <option value="title|asc">Title A → Z</option>
+  </select>
+  <input type="number" id="minPrice" placeholder="Min Kz" oninput="debounceLoad()" style="width:120px">
+  <input type="number" id="maxPrice" placeholder="Max Kz" oninput="debounceLoad()" style="width:120px">
+  <button id="mapToggle" onclick="toggleMap()" style="background:#1a73e8;">📍 Map</button>
+  <button id="resetWidths" onclick="resetColumnWidths()" style="background:#999;">Reset widths</button>
+</div>
+
+<div id="mapWrap">
+  <div class="geosearch" style="margin-bottom:12px;">
+    <input type="text" id="geoSearch" placeholder="Search a landmark, neighborhood, or address (e.g. Belas Shopping)" autocomplete="off">
+    <span class="status" id="geoStatus"></span>
+    <div class="results" id="geoResults"></div>
+  </div>
+  <div id="map"></div>
+  <div class="map-hint">
+    <span>Click the map or search above to set a reference point.</span>
+    <span>Ref: <strong id="refPoint">none</strong></span>
+    <button onclick="clearRef()">Clear</button>
+  </div>
+</div>
+
+<div class="stats" id="stats"></div>
+<div id="content"><div class="empty">Click "Refresh from WhatsApp" to load listings</div></div>
+
+<div id="toast"></div>
+
+<script src="/resize.js"></script>
+<script src="/map.js"></script>
+<script src="/app.js"></script>
+</body>
+</html>
