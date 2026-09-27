@@ -68,7 +68,7 @@ var knownLocations = []string{
 	"Camama", "Morro Bento", "Nova Vida", "Golf 2", "Golfo 2", "Golfe 2",
 	"Golf 1", "Golfe 1", "Zango", "Luanda Sul", "Patriota", "Lar do Patriota",
 	"Benfica", "Rocha Pinto", "Rocha", "Fubu", "Gamek", "Soba Kapassa",
-	"Capolo", "Petrangol", "Palanca", "Calemba", "Mufulama", "Cassenda",
+	"Capolo", "Petrangol", "Palanca", "Calemba", "Calemba 2", "Mufulama", "Cassenda",
 	"Prenda", "Futungo", "Futungo de Belas", "Corimba", "Ilha de Luanda",
 	"Ilha do Cabo", "Tala Hady", "Tala-Alice", "Kimbango", "Kikuxi",
 	"Bairro Popular", "Bairro Militar", "Bairro Azul", "Bairro das Tendas",
@@ -82,6 +82,7 @@ var knownLocations = []string{
 	// Zones with numbers
 	"Zango 0", "Zango 1", "Zango 2", "Zango 3", "Zango 4", "Zango 5",
 	"Camama 1", "Camama 2", "Camama 3", "Camama 4",
+	"Calemba 2",
 
 	// Landmarks / reference places
 	"Angomart", "Kero", "Xyami", "Belas Shopping", "Fortaleza",
@@ -90,7 +91,7 @@ var knownLocations = []string{
 	"Bairro Operário", "Quinanga", "Margal", "Estalagem",
 }
 
-var numberedBases = []string{"golf", "golfe", "golfo", "zango", "camama"}
+var numberedBases = []string{"golf", "golfe", "golfo", "zango", "camama", "calemba"}
 
 func matchLocation(text string) string {
 	lower := strings.ToLower(text)

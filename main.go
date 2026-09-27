@@ -71,6 +71,7 @@ var parentLocation = map[string]string{
 	"Bairro Azul":     "Maianga",
 	"Bairro das Tendas": "Rangel",
 	"Tala-Alice":      "Tala Hady",
+	"Calemba 2": "Calemba",
 }
 
 func main() {
