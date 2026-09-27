@@ -26,14 +26,20 @@
   .tab { padding: 8px 16px; border: 1px solid transparent; border-bottom: none; border-radius: 4px 4px 0 0; cursor: pointer; background: #f0f0f0; font-size: 14px; }
   .tab.active { background: white; border-color: #ddd; border-bottom-color: white; font-weight: 600; margin-bottom: -1px; }
   .stats { padding: 8px 24px; color: #666; font-size: 13px; }
-  table { width: 100%; border-collapse: collapse; background: white; }
-  th, td { padding: 10px 12px; text-align: left; border-bottom: 1px solid #eee; font-size: 13px; vertical-align: top; }
-  th { background: #fafafa; font-weight: 600; position: sticky; top: 0; cursor: pointer; user-select: none; }
+  table { width: 100%; border-collapse: collapse; background: white; table-layout: fixed; }
+  th, td { padding: 10px 12px; text-align: left; border-bottom: 1px solid #eee; font-size: 13px; vertical-align: top; overflow: hidden; text-overflow: ellipsis; }
+  th { background: #fafafa; font-weight: 600; position: sticky; top: 0; cursor: pointer; user-select: none; position: relative; }
   th:hover { background: #eef2f7; }
   th .sort-ind { color: #1a73e8; margin-left: 4px; font-size: 11px; }
+  th .resizer {
+    position: absolute; top: 0; right: 0; width: 6px; height: 100%;
+    cursor: col-resize; user-select: none; z-index: 2;
+  }
+  th .resizer:hover, th .resizer.dragging { background: #1a73e8; opacity: 0.5; }
   tr:hover { background: #f9f9f9; }
-  .row-num { color: #999; font-size: 12px; text-align: right; width: 40px; font-variant-numeric: tabular-nums; cursor: default; }
-  .title { font-weight: 600; max-width: 380px; }
+  .row-num { color: #999; font-size: 12px; text-align: right; font-variant-numeric: tabular-nums; cursor: default; }
+  .title { font-weight: 600; }
+  .title details summary { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .price { color: #1a73e8; font-weight: 600; white-space: nowrap; }
   .tag { display: inline-block; padding: 2px 8px; border-radius: 3px; background: #e8f0fe; color: #1a73e8; font-size: 12px; }
   .empty { padding: 40px; text-align: center; color: #999; }
@@ -43,7 +49,7 @@
   .actions { white-space: nowrap; }
   .copy-btn { background: #1a73e8; color: white; border: none; padding: 4px 10px; border-radius: 3px; font-size: 12px; cursor: pointer; }
   .copy-btn:hover { background: #1558b8; }
-  .loc-raw { color: #666; font-size: 11px; font-style: italic; display: block; margin-top: 2px; }
+  .loc-raw { color: #666; font-size: 11px; font-style: italic; display: block; margin-top: 2px; overflow: hidden; text-overflow: ellipsis; }
   .placeholder { color: #999; font-style: italic; }
   #toast {
     position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%);
@@ -115,6 +121,7 @@
   <input type="number" id="minPrice" placeholder="Min Kz" oninput="debounceLoad()" style="width:120px">
   <input type="number" id="maxPrice" placeholder="Max Kz" oninput="debounceLoad()" style="width:120px">
   <button id="mapToggle" onclick="toggleMap()" style="background:#1a73e8;">📍 Map</button>
+  <button id="resetWidths" onclick="resetColumnWidths()" style="background:#999;">Reset widths</button>
 </div>
 
 <div id="mapWrap">
@@ -149,6 +156,122 @@ let refLatLng = null;
 let geoDebounce = null;
 let geoResults = [];
 let geoActiveIndex = -1;
+
+// ---------- Column widths ----------
+
+const COL_WIDTHS_KEY = 'listings.colWidths.v1';
+
+// Default widths in pixels, keyed by data-col. The "#" and "Actions" columns
+// have their own fixed defaults. Any column not listed gets a sane fallback.
+const DEFAULT_WIDTHS = {
+  'row-num':  50,
+  'title':    380,
+  'distance': 100,
+  'typology': 110,
+  'price':    130,
+  'location': 200,
+  'phone':    140,
+  'timestamp':110,
+  'chat_name':200,
+  'actions':  130,
+};
+
+let colWidths = {};
+
+function loadColumnWidths() {
+  try {
+    const raw = localStorage.getItem(COL_WIDTHS_KEY);
+    colWidths = raw ? JSON.parse(raw) : {};
+  } catch (e) {
+    colWidths = {};
+  }
+}
+
+function saveColumnWidths() {
+  try {
+    localStorage.setItem(COL_WIDTHS_KEY, JSON.stringify(colWidths));
+  } catch (e) { /* ignore */ }
+}
+
+function widthFor(colKey) {
+  if (colWidths[colKey] != null) return colWidths[colKey];
+  if (DEFAULT_WIDTHS[colKey] != null) return DEFAULT_WIDTHS[colKey];
+  return 140;
+}
+
+function resetColumnWidths() {
+  colWidths = {};
+  saveColumnWidths();
+  load();
+}
+
+// applyWidths walks the current table's <th> elements and sets their widths.
+function applyWidths() {
+  document.querySelectorAll('th[data-col]').forEach(th => {
+    const key = th.dataset.col;
+    th.style.width = widthFor(key) + 'px';
+    th.style.minWidth = widthFor(key) + 'px';
+  });
+}
+
+// attachResizers wires up the drag handles on every resizable <th>.
+// Called after each render(). Column key comes from data-col.
+function attachResizers() {
+  document.querySelectorAll('th[data-col]').forEach(th => {
+    if (th.querySelector('.resizer')) return; // already attached
+    const handle = document.createElement('div');
+    handle.className = 'resizer';
+    handle.addEventListener('mousedown', startResize);
+    handle.addEventListener('touchstart', startResize, { passive: false });
+    th.appendChild(handle);
+  });
+  applyWidths();
+}
+
+function startResize(e) {
+  e.preventDefault();
+  e.stopPropagation();
+
+  const handle = e.currentTarget;
+  const th = handle.parentElement;
+  const colKey = th.dataset.col;
+  if (!colKey) return;
+
+  handle.classList.add('dragging');
+  document.body.style.cursor = 'col-resize';
+  document.body.style.userSelect = 'none';
+
+  const startX = e.touches ? e.touches[0].clientX : e.clientX;
+  const startWidth = th.getBoundingClientRect().width;
+
+  function onMove(ev) {
+    const x = ev.touches ? ev.touches[0].clientX : ev.clientX;
+    const delta = x - startX;
+    const newWidth = Math.max(40, Math.min(1000, startWidth + delta));
+    th.style.width = newWidth + 'px';
+    th.style.minWidth = newWidth + 'px';
+  }
+
+  function onUp() {
+    handle.classList.remove('dragging');
+    document.body.style.cursor = '';
+    document.body.style.userSelect = '';
+    const finalWidth = th.getBoundingClientRect().width;
+    colWidths[colKey] = Math.round(finalWidth);
+    saveColumnWidths();
+    document.removeEventListener('mousemove', onMove);
+    document.removeEventListener('mouseup', onUp);
+    document.removeEventListener('touchmove', onMove);
+    document.removeEventListener('touchend', onUp);
+  }
+
+  document.addEventListener('mousemove', onMove);
+  document.addEventListener('mouseup', onUp);
+  document.addEventListener('touchmove', onMove, { passive: false });
+  document.addEventListener('touchend', onUp);
+}
+
+// ---------- End column widths ----------
 
 function debounceLoad() { clearTimeout(timer); timer = setTimeout(load, 300); }
 
@@ -309,7 +432,7 @@ function render(rows, opts) {
   if (prox) headers.splice(1, 0, { col: 'distance', label: 'Distance' });
 
   let html = '<table><thead><tr>';
-  html += '<th class="row-num">#</th>';
+  html += '<th class="row-num" data-col="row-num">#</th>';
   for (let k = 0; k < headers.length; k++) {
     const h = headers[k];
     const clickable = !prox && h.col !== 'distance';
@@ -317,7 +440,7 @@ function render(rows, opts) {
             (clickable ? ' onclick="setSort(\'' + h.col + '\')"' : '') +
             '>' + h.label + '</th>';
   }
-  html += '<th>Actions</th></tr></thead><tbody>';
+  html += '<th data-col="actions">Actions</th></tr></thead><tbody>';
 
   for (let i = 0; i < rows.length; i++) {
     const r = rows[i];
@@ -360,6 +483,8 @@ function render(rows, opts) {
   html += '</tbody></table>';
   document.getElementById('content').innerHTML = html;
   window.__rows = rows;
+
+  attachResizers();
 }
 
 function copySearchByIndex(i) {
@@ -399,8 +524,6 @@ function initMap() {
   });
 }
 
-// setRefPoint drops the marker, updates the label, and reloads the table.
-// `label` is optional and used by geosearch to show a human-readable name.
 function setRefPoint(lat, lng, label) {
   if (!map) return;
   refLatLng = L.latLng(lat, lng);
@@ -466,8 +589,6 @@ function pickGeoResult(i) {
   hideGeoResults();
 }
 
-// Nominatim returns a display_name with lots of comma-separated parts.
-// Split the first part off as the primary label, keep the rest as secondary.
 function splitNominatimName(displayName) {
   const parts = (displayName || '').split(',').map(s => s.trim());
   if (parts.length <= 1) return { primary: displayName || '', secondary: '' };
@@ -482,8 +603,6 @@ async function geosearch(query) {
   if (!query || query.length < 3) { hideGeoResults(); status.textContent = ''; return; }
   status.textContent = 'Searching…';
   try {
-    // bbox restricts to greater Luanda so results are locally relevant.
-    // viewbox = left,top,right,bottom (west,north,east,south)
     const url = 'https://nominatim.openstreetmap.org/search'
       + '?format=json'
       + '&limit=6'
@@ -513,7 +632,6 @@ async function geosearch(query) {
   }
 }
 
-// Wire up the geosearch input once the DOM is ready.
 function wireGeoSearch() {
   const inp = document.getElementById('geoSearch');
   if (!inp) return;
@@ -527,7 +645,6 @@ function wireGeoSearch() {
   inp.addEventListener('keydown', function(e) {
     if (!geoResults.length) {
       if (e.key === 'Enter') {
-        // Immediate search on Enter if no results yet
         clearTimeout(geoDebounce);
         geosearch(inp.value.trim());
       }
@@ -553,7 +670,6 @@ function wireGeoSearch() {
     }
   });
 
-  // Close dropdown when clicking outside
   document.addEventListener('click', function(e) {
     const wrap = document.querySelector('.geosearch');
     if (wrap && !wrap.contains(e.target)) hideGeoResults();
@@ -654,48 +770,4 @@ async function refresh() {
     } else if (ev.type === 'step') {
       label.textContent = (ev.index + 1) + '/' + ev.total + ' — searching "' + ev.keyword + '"…';
     } else if (ev.type === 'step_done') {
-      const pct = ((ev.index + 1) / ev.total) * 100;
-      fill.style.width = pct + '%';
-      label.textContent = (ev.index + 1) + '/' + ev.total +
-        ' — rentals:' + (c.rental||0) + ' seek:' + (c.seeker||0) +
-        ' sale:' + (c.sale||0) + ' noise:' + (c.noise||0);
-    } else if (ev.type === 'done') {
-      fill.style.width = '100%';
-      label.textContent = 'Done — rentals:' + (c.rental||0) +
-        ' seek:' + (c.seeker||0) + ' sale:' + (c.sale||0) +
-        ' noise:' + (c.noise||0);
-    }
-  }
-}
-
-// ---------- Boot ----------
-
-async function loadCounts() {
-  try {
-    const res = await fetch('/api/counts');
-    window.__counts = await res.json();
-  } catch (e) {
-    window.__counts = {};
-  }
-}
-
-(async function() {
-  wireGeoSearch();
-  loadSyncStatus();
-  setInterval(loadSyncStatus, 60000);
-  await loadCounts();
-  try {
-    const res = await fetch('/api/listings?category=rental');
-    const rows = await res.json();
-    if (rows.length === 0) {
-      refresh();
-    } else {
-      load();
-    }
-  } catch (e) {
-    load();
-  }
-})();
-</script>
-</body>
-</html>
+      const pct = ((ev.index + 1
