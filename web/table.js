@@ -3,10 +3,8 @@
 // Thumbnails open the lightbox (see lightbox.js). Clicking elsewhere in the
 // panel navigates to the detail page.
 
-const MEDIA_CACHE = {};      // msg_id -> [{url, type, mime, msg_id}]
+const MEDIA_CACHE = {};
 const THUMB_LIMIT = 6;
-
-// ---------- Public entry ----------
 
 function renderTable(rows, opts) {
   opts = opts || {};
@@ -37,7 +35,7 @@ function renderTable(rows, opts) {
     { col: 'timestamp', label: 'Date' },
     { col: 'chat_name', label: 'Source' }
   ];
-  if (prox) headers.splice(1, 0, { col: 'distance', label: 'Distance' });
+  if (prox) headers.splice(0, 0, { col: 'distance', label: 'Distance' });
 
   let html = '<table><thead><tr>';
   html += '<th class="row-num" data-col="row-num">#</th>';
@@ -77,10 +75,9 @@ function renderTable(rows, opts) {
     }
 
     const detailUrl = '/listing/' + encodeURIComponent(r.msg_id);
-    const rowId = 'row-' + i;
     const panelId = 'panel-' + i;
 
-    html += '<tr data-idx="' + i + '" id="' + rowId + '">' +
+    html += '<tr data-idx="' + i + '">' +
       '<td class="row-num" onclick="toggleRow(\'' + panelId + '\',\'' + r.msg_id + '\')" title="Expandir/colapsar">' + (i + 1) + '</td>' +
       distCell +
       '<td class="title"><a class="title-link" href="' + detailUrl + '">' + titleOr(r.title, '(sem título)') + '</a></td>' +
@@ -92,11 +89,12 @@ function renderTable(rows, opts) {
       '<td>' + esc(r.chat_name) + '</td>' +
       '<td class="actions">' +
         '<a class="copy-btn open-btn" href="' + detailUrl + '">Open</a>' +
-        '<button class="copy-btn" onclick="copySearchByIndex(' + i + ')">Find in WhatsApp</button>' +
+        '<button class="copy-btn send-btn" onclick="openSendDialog(\'' +
+          esc(r.sender_jid) + '\',\'' + esc(r.sender || r.sender_jid) + '\',\'' +
+          esc(r.msg_id) + '\',\'' + esc(r.chat_jid) + '\')">Enviar</button>' +
       '</td>' +
     '</tr>';
 
-    // Hidden expansion panel — populated lazily on click.
     html += '<tr class="panel-row" id="' + panelId + '"><td colspan="' + colspan + '">' +
       '<div class="panel-loading">A carregar…</div>' +
     '</td></tr>';
@@ -113,8 +111,6 @@ function renderTable(rows, opts) {
   attachResizers();
 }
 
-// ---------- Expansion ----------
-
 function toggleRow(panelId, msgId) {
   const panel = document.getElementById(panelId);
   if (!panel) return;
@@ -125,14 +121,12 @@ function toggleRow(panelId, msgId) {
     return;
   }
 
-  // Close any other open panels first.
   document.querySelectorAll('.panel-row.open').forEach(function (p) {
     p.classList.remove('open');
   });
 
   panel.classList.add('open');
 
-  // Lazy-fetch the listing detail (which includes media) if not cached.
   const row = window.__rows.find(function (r) { return r.msg_id === msgId; });
   if (!row) return;
 
@@ -156,10 +150,8 @@ function toggleRow(panelId, msgId) {
 function renderPanel(panel, row, media) {
   const detailUrl = '/listing/' + encodeURIComponent(row.msg_id);
 
-  // Left: raw text.
   const textHtml = '<div class="panel-text"><pre>' + esc(row.raw_text || '—') + '</pre></div>';
 
-  // Right: thumbnails.
   let thumbsHtml = '';
   if (media.length === 0) {
     thumbsHtml = '<div class="panel-no-media">Sem média</div>';
@@ -189,25 +181,4 @@ function renderPanel(panel, row, media) {
       textHtml +
       rightHtml +
     '</div>';
-}
-
-// ---------- Copy for WhatsApp search ----------
-
-function copySearchByIndex(i) {
-  const row = window.__rows[i];
-  if (row) copySearch(row);
-}
-
-async function copySearch(row) {
-  let snippet = (row.title || '').trim();
-  if (snippet.length < 10 && row.raw_text) {
-    snippet = row.raw_text.trim().slice(0, 60);
-  }
-  snippet = snippet.split('\n')[0].trim().slice(0, 60);
-  try {
-    await navigator.clipboard.writeText(snippet);
-    showToast('Copied. Paste into WhatsApp search (Ctrl+V).');
-  } catch (e) {
-    showToast('Copy failed — select the text manually.');
-  }
 }

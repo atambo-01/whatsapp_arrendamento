@@ -53,21 +53,21 @@ func main() {
 	}
 	var err error
 	db, err = sql.Open("sqlite", dbPath)
-	db.Exec("PRAGMA journal_mode=WAL")
-	db.Exec("PRAGMA busy_timeout=5000")
-	db.Exec("PRAGMA synchronous=NORMAL")
 	if err != nil {
 		log.Fatal(err)
 	}
 	defer db.Close()
+
+	db.Exec("PRAGMA journal_mode=WAL")
+	db.Exec("PRAGMA busy_timeout=5000")
+	db.Exec("PRAGMA synchronous=NORMAL")
+
 	log.Printf("using database: %s", dbPath)
 
 	if err := initDB(); err != nil {
 		log.Fatal(err)
 	}
 
-	// Open wacli-pro's store (read-only) for media lookups. Non-fatal: if the
-	// file isn't there, media endpoints return 404/503 and the rest still works.
 	initWacliDB()
 
 	http.HandleFunc("/api/listings", handleListings)
@@ -79,6 +79,7 @@ func main() {
 	http.HandleFunc("/api/counts", handleCounts)
 	http.HandleFunc("/api/listing/", handleListing)
 	http.HandleFunc("/api/image/", handleImage)
+	http.HandleFunc("/api/send", handleSend)
 	http.HandleFunc("/", handleIndex)
 
 	log.Printf("Server running at http://localhost:%s", port)
@@ -122,8 +123,6 @@ func initDB() error {
 }
 
 func handleIndex(w http.ResponseWriter, r *http.Request) {
-	// Client-side route: /listing/<msg_id> serves the detail page shell.
-	// The page itself reads the ID from window.location and fetches the data.
 	if strings.HasPrefix(r.URL.Path, "/listing/") {
 		data, err := webFS.ReadFile("web/listing.html")
 		if err != nil {
@@ -136,8 +135,6 @@ func handleIndex(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Serve static files from the embedded web/ directory.
-	// "/" maps to web/index.html implicitly.
 	path := strings.TrimPrefix(r.URL.Path, "/")
 	if path == "" {
 		path = "index.html"

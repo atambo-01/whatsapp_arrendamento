@@ -41,8 +41,7 @@ details pre { white-space: pre-wrap; font-size: 12px; background: #f5f5f5; paddi
 .loc-raw { color: #666; font-size: 11px; font-style: italic; display: block; margin-top: 2px; overflow: hidden; text-overflow: ellipsis; }
 .placeholder { color: #999; font-style: italic; }
 #toast {
-  position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%);
-  background: #333; color: white; padding: 10px 18px; border-radius: 4px;
+  position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);  background: #d32f2f; color: #ffffff; padding: 10px 18px; border-radius: 4px;
   font-size: 13px; opacity: 0; transition: opacity 0.2s; pointer-events: none;
   z-index: 1001;
 }
@@ -247,4 +246,102 @@ details pre { white-space: pre-wrap; font-size: 12px; background: #f5f5f5; paddi
   border-radius: 999px;
   font-size: 13px;
   z-index: 2;
+}
+
+/* ---------- Send dialog ---------- */
+.send-dialog {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.5);
+  display: none;
+  align-items: center;
+  justify-content: center;
+  z-index: 1100;
+  padding: 20px;
+}
+.send-dialog.open { display: flex; }
+.send-panel {
+  background: #fff;
+  border-radius: 10px;
+  padding: 20px;
+  width: 100%;
+  max-width: 480px;
+  box-shadow: 0 8px 32px rgba(0,0,0,0.25);
+}
+.send-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 12px;
+}
+.send-title {
+  font-size: 16px;
+  font-weight: 600;
+}
+.send-close {
+  background: transparent;
+  border: none;
+  font-size: 22px;
+  line-height: 1;
+  cursor: pointer;
+  color: #666;
+  padding: 0 4px;
+}
+.send-close:hover { color: #000; background: transparent; }
+.send-to {
+  font-size: 13px;
+  color: #555;
+  margin-bottom: 10px;
+  word-break: break-word;
+}
+.send-to span { color: #222; font-weight: 500; }
+.send-templates {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+  font-size: 13px;
+  color: #555;
+}
+.send-templates select {
+  flex: 1;
+  padding: 6px 8px;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  font-size: 13px;
+}
+.send-panel textarea {
+  width: 100%;
+  padding: 10px;
+  border: 1px solid #ccc;
+  border-radius: 6px;
+  font-family: inherit;
+  font-size: 14px;
+  resize: vertical;
+  box-sizing: border-box;
+}
+.send-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 12px;
+}
+.send-cancel {
+  background: #eee;
+  color: #333;
+  padding: 8px 16px;
+}
+.send-cancel:hover { background: #ddd; }
+.send-submit {
+  background: #1a73e8;
+  color: #fff;
+  padding: 8px 16px;
+}
+.send-submit:hover { background: #1558b8; }
+.send-submit:disabled { background: #999; cursor: wait; }
+.send-hint {
+  font-size: 11px;
+  color: #999;
+  text-align: right;
+  margin-top: 6px;
 }

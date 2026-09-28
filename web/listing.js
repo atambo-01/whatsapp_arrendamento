@@ -18,8 +18,6 @@
   var navNext = document.getElementById('nav-next');
   var navPos = document.getElementById('nav-pos');
 
-  // ---------- Prev/Next navigation state ----------
-
   var navList = [];
   var navIndex = -1;
 
@@ -61,8 +59,6 @@
     }
   }
 
-  // ---------- Helpers ----------
-
   function esc(s) {
     if (s === null || s === undefined) return '';
     return String(s)
@@ -88,15 +84,11 @@
     return n.toLocaleString('pt-PT') + ' Kz';
   }
 
-  // Renders a meta field. Always emits the wrapper so the grid keeps the
-  // same shape regardless of which fields are empty. Empty values get "—".
   function metaItem(label, valueHtml) {
     var v = (valueHtml && valueHtml !== '') ? valueHtml : '<span class="dash">—</span>';
     return '<div class="meta-item"><div class="label">' + esc(label) + '</div>' +
            '<div class="value">' + v + '</div></div>';
   }
-
-  // ---------- Render ----------
 
   function render(data) {
     var priceStr = fmtPrice(data.price, data.price_text);
@@ -122,7 +114,6 @@
       mediaHtml += '</div></div>';
     }
 
-    // Build each meta field — always emitted, empty values render as "—".
     var typologyVal = data.typology ? esc(data.typology) : '';
 
     var locationVal = '';
@@ -137,6 +128,10 @@
     var publishedVal = esc(fmtDate(data.timestamp));
     var groupVal = data.chat_name ? esc(data.chat_name) : '';
     var authorVal = data.sender ? esc(data.sender) : '';
+
+    var sendLabel = (data.sender || data.sender_jid || '').replace(/'/g, '&#39;');
+    var sendJid = (data.sender_jid || '').replace(/'/g, '&#39;');
+    var sendChat = (data.chat_jid || '').replace(/'/g, '&#39;');
 
     var html =
       '<div class="card">' +
@@ -153,8 +148,7 @@
         '</div>' +
         '<div class="actions">' +
           '<a class="btn primary" href="/">Voltar à lista</a>' +
-          '<button class="btn" id="copy-raw">Copiar texto</button>' +
-          '<button class="btn" id="copy-id">Copiar ID</button>' +
+          '<button class="btn send-action" onclick="openSendDialog(\'' + sendJid + '\',\'' + sendLabel + '\',\'' + esc(data.msg_id) + '\',\'' + sendChat + '\')">Enviar mensagem</button>' +
         '</div>' +
       '</div>' +
 
@@ -167,25 +161,6 @@
 
     content.innerHTML = html;
 
-    var copyRaw = document.getElementById('copy-raw');
-    if (copyRaw) {
-      copyRaw.addEventListener('click', function () {
-        navigator.clipboard.writeText(data.raw_text || '').then(function () {
-          copyRaw.textContent = 'Copiado!';
-          setTimeout(function () { copyRaw.textContent = 'Copiar texto'; }, 1500);
-        });
-      });
-    }
-    var copyId = document.getElementById('copy-id');
-    if (copyId) {
-      copyId.addEventListener('click', function () {
-        navigator.clipboard.writeText(data.msg_id || '').then(function () {
-          copyId.textContent = 'Copiado!';
-          setTimeout(function () { copyId.textContent = 'Copiar ID'; }, 1500);
-        });
-      });
-    }
-
     var items = content.querySelectorAll('.media-item');
     for (var j = 0; j < items.length; j++) {
       items[j].addEventListener('click', function () {
@@ -193,8 +168,6 @@
       });
     }
   }
-
-  // ---------- Lightbox ----------
 
   function openLightbox(type, src) {
     if (type === 'video') {
@@ -215,8 +188,6 @@
     if (e.target === lightbox) closeLightbox();
   });
 
-  // ---------- Keyboard shortcuts ----------
-
   document.addEventListener('keydown', function (e) {
     if (e.key === 'Escape') { closeLightbox(); return; }
     if (lightbox.classList.contains('open')) return;
@@ -227,17 +198,14 @@
     }
   });
 
-  // ---------- Error handling ----------
-
   function showError(msg) {
     content.innerHTML = '<div class="card"><h1>Erro</h1><p>' + esc(msg) + '</p>' +
       '<div class="actions"><a class="btn primary" href="/">Voltar à lista</a></div></div>';
   }
 
-  // ---------- Boot ----------
-
   loadNavList();
   wireNav();
+  initSendDialog();
 
   if (!msgId) {
     showError('ID em falta no URL.');

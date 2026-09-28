@@ -41,7 +41,7 @@
     <option value="location|asc">Location A–Z</option>
     <option value="chat_name|asc">Source A–Z</option>
   </select>
-  <button id="mapToggle" onclick="toggleMap()">📍 Map</button>
+  <button id="mapToggle" onclick="toggleMap()">🗺️ Map</button>
 </div>
 
 <div id="mapWrap">
@@ -67,11 +67,32 @@
   <div id="lightbox-content"></div>
 </div>
 
+<div class="send-dialog" id="sendDialog">
+  <div class="send-panel">
+    <div class="send-header">
+      <span class="send-title">Enviar mensagem</span>
+      <button class="send-close" id="sendCloseBtn">×</button>
+    </div>
+    <div class="send-to">Para: <span id="sendTo"></span></div>
+    <div class="send-templates">
+      <label>Modelo:</label>
+      <select id="sendTemplate"></select>
+    </div>
+    <textarea id="sendText" rows="5" placeholder="Escreva a mensagem…"></textarea>
+    <div class="send-actions">
+      <button class="send-cancel" id="sendCancelBtn">Cancelar</button>
+      <button class="send-submit" id="sendBtn">Enviar</button>
+    </div>
+    <div class="send-hint">Ctrl+Enter para enviar</div>
+  </div>
+</div>
+
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script src="/ui-state.js"></script>
 <script src="/resize.js"></script>
 <script src="/map.js"></script>
 <script src="/lightbox.js"></script>
+<script src="/send.js"></script>
 <script src="/table.js"></script>
 <script src="/app.js"></script>
 </body>
