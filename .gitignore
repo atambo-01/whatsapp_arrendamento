@@ -1,4 +1,22 @@
-listings.db
-listings
-listings.exe
-*.db
+# 1. Ignore everything
+*
+
+# 2. Un-ignore directories we need to descend into
+!*/
+!.gitignore
+
+# 3. Un-ignore the files we actually want to track
+!Makefile
+!README.md
+!go.mod
+!go.sum
+!main.go
+!geo.go
+!coords.go
+!parser.go
+!handlers_api.go
+!handlers_refresh.go
+!handlers_media.go
+!handlers_audit.go
+!seed/
+!web/
