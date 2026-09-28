@@ -1,6 +1,5 @@
-// ---------- Map ----------
-// Map state lives here. `refLatLng` is the picked reference point; when set,
-// app.js's load() routes through /api/nearby instead of /api/listings.
+// Map panel + geosearch. Ref point persists via ui-state.js so navigating
+// to a detail page and back restores the map exactly.
 
 let map = null;
 let marker = null;
@@ -18,12 +17,13 @@ function toggleMap() {
   if (showing) {
     wrap.style.display = 'none';
     btn.classList.remove('active');
-    clearRef();
+    uiStateSave({ mapOpen: false });
     return;
   }
 
   wrap.style.display = 'block';
   btn.classList.add('active');
+  uiStateSave({ mapOpen: true });
   if (!map) initMap();
   setTimeout(function() { map.invalidateSize(); }, 50);
 }
@@ -52,6 +52,8 @@ function setRefPoint(lat, lng, label) {
   el.textContent = label
     ? label + ' (' + lat.toFixed(4) + ', ' + lng.toFixed(4) + ')'
     : lat.toFixed(4) + ', ' + lng.toFixed(4);
+
+  uiStateSave({ refLat: lat, refLng: lng, refLabel: label || null });
   load();
 }
 
@@ -62,11 +64,43 @@ function clearRef() {
     marker = null;
   }
   const el = document.getElementById('refPoint');
-  if (el) el.textContent = 'none';
+  if (el) el.textContent = 'Click the map to set a reference point.';
   const inp = document.getElementById('geoSearch');
   if (inp) inp.value = '';
   hideGeoResults();
+
+  uiStateSave({ refLat: null, refLng: null, refLabel: null });
   load();
+}
+
+// Called from app.js boot with the loaded UI state.
+function restoreMapState(saved) {
+  const wrap = document.getElementById('mapWrap');
+  const btn = document.getElementById('mapToggle');
+
+  if (saved.mapOpen) {
+    wrap.style.display = 'block';
+    btn.classList.add('active');
+    if (!map) initMap();
+    setTimeout(function () { map.invalidateSize(); }, 50);
+
+    if (saved.refLat != null && saved.refLng != null) {
+      // Set state without triggering a load — app.js's boot does that.
+      refLatLng = L.latLng(saved.refLat, saved.refLng);
+      if (marker) {
+        marker.setLatLng(refLatLng);
+      } else {
+        marker = L.marker(refLatLng).addTo(map);
+      }
+      map.setView(refLatLng, 13);
+      const el = document.getElementById('refPoint');
+      el.textContent = saved.refLabel
+        ? saved.refLabel + ' (' + saved.refLat.toFixed(4) + ', ' + saved.refLng.toFixed(4) + ')'
+        : saved.refLat.toFixed(4) + ', ' + saved.refLng.toFixed(4);
+      const inp = document.getElementById('geoSearch');
+      if (inp && saved.refLabel) inp.value = saved.refLabel;
+    }
+  }
 }
 
 // ---------- Geosearch (Nominatim) ----------

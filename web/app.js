@@ -1,5 +1,6 @@
 // Main page shell: state, boot, load, sync status, refresh, counts.
-// Table rendering lives in table.js, lightbox/media in lightbox.js.
+// Table rendering lives in table.js, lightbox/media in lightbox.js,
+// state persistence in ui-state.js, map in map.js.
 
 // ---------- State ----------
 
@@ -10,7 +11,13 @@ let sortDir = 'desc';
 
 // ---------- Helpers ----------
 
-function debounceLoad() { clearTimeout(timer); timer = setTimeout(load, 300); }
+function debounceLoad() {
+  clearTimeout(timer);
+  timer = setTimeout(function () {
+    uiStateCaptureInputs();
+    load();
+  }, 300);
+}
 
 function esc(s) {
   if (s == null) return '';
@@ -42,6 +49,7 @@ function showToast(msg) {
 function setCat(cat) {
   currentCat = cat;
   document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.cat === cat));
+  uiStateSave({ currentCat: cat });
   load();
 }
 
@@ -54,6 +62,7 @@ function setSort(col) {
     sortDir = 'asc';
   }
   syncDropdown();
+  uiStateSave({ sortCol: sortCol, sortDir: sortDir });
   load();
 }
 
@@ -74,6 +83,7 @@ function onDropdownChange() {
   const parts = val.split('|');
   sortCol = parts[0];
   sortDir = parts[1];
+  uiStateSave({ sortCol: sortCol, sortDir: sortDir });
   load();
 }
 
@@ -236,6 +246,18 @@ async function refresh() {
   loadColumnWidths();
   wireGeoSearch();
   initLightbox();
+
+  // Restore persisted UI state before the first load.
+  const saved = uiStateApplyToGlobals();
+  uiStateRestoreInputs();
+  uiStateRestoreTabs();
+  syncDropdown();
+
+  // Restore map state if it was open.
+  if (typeof restoreMapState === 'function') {
+    restoreMapState(saved);
+  }
+
   loadSyncStatus();
   setInterval(loadSyncStatus, 60000);
   await loadCounts();
@@ -245,9 +267,11 @@ async function refresh() {
     if (rows.length === 0) {
       refresh();
     } else {
-      load();
+      await load();
+      uiStateRestoreScroll();
     }
   } catch (e) {
-    load();
+    await load();
+    uiStateRestoreScroll();
   }
 })();

@@ -3,13 +3,14 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>WhatsApp Arrendamento — Listings</title>
+<title>🏠 WhatsApp Arrendamento — Listings</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
 <link rel="stylesheet" href="/style.css">
 </head>
 <body>
 
 <header>
-  <h1>WhatsApp Arrendamento</h1>
+  <h1>🏠 WhatsApp Arrendamento</h1>
   <div id="syncStatus">Sync: —</div>
   <button id="refreshBtn" onclick="refresh()">Refresh from WhatsApp</button>
   <div class="progress" id="progress">
@@ -40,18 +41,18 @@
     <option value="location|asc">Location A–Z</option>
     <option value="chat_name|asc">Source A–Z</option>
   </select>
-  <button id="mapToggle" onclick="toggleMap()">Map</button>
+  <button id="mapToggle" onclick="toggleMap()">📍 Map</button>
 </div>
 
 <div id="mapWrap">
   <div class="geosearch">
-    <input type="text" id="geoInput" placeholder="Pesquisar localização…" autocomplete="off">
+    <input type="text" id="geoSearch" placeholder="📍 Pesquisar localização…" autocomplete="off">
     <span class="status" id="geoStatus"></span>
     <div class="results" id="geoResults"></div>
   </div>
   <div id="map"></div>
   <div class="map-hint">
-    <span id="refLabel">Click the map to set a reference point.</span>
+    <span id="refPoint">Click the map to set a reference point.</span>
     <button onclick="clearRef()">Clear</button>
   </div>
 </div>
@@ -66,11 +67,12 @@
   <div id="lightbox-content"></div>
 </div>
 
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="/ui-state.js"></script>
 <script src="/resize.js"></script>
 <script src="/map.js"></script>
 <script src="/lightbox.js"></script>
 <script src="/table.js"></script>
 <script src="/app.js"></script>
-
 </body>
 </html>
