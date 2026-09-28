@@ -6,71 +6,162 @@ import (
 	"log"
 	"net/http"
 	"os/exec"
+	"strconv"
+	"time"
 )
 
-// refreshOnce runs one keyword search against wacli-pro, parses any messages
-// it finds, and inserts them into the DB. `seen` dedupes across keywords
-// within a single refresh run. Returns the number of newly inserted rows,
-// the total number of messages wacli returned, and a per-category tally.
-func refreshOnce(kw string, seen map[string]bool) (inserted int, seenCount int, counts map[string]int) {
-	counts = map[string]int{"rental": 0, "seeker": 0, "sale": 0, "noise": 0}
+// getLastParsedTs returns the highest message timestamp we've already parsed,
+// stored in sync_state. First run: 0, so we fetch everything wacli has.
+func getLastParsedTs() int64 {
+	var ts int64
+	err := db.QueryRow(`SELECT last_msg_ts FROM sync_state WHERE id = 1`).Scan(&ts)
+	if err != nil {
+		return 0
+	}
+	return ts
+}
 
-	cmd := exec.Command("wacli-pro", "messages", "search", kw, "--json", "--limit", "500")
+// setLastParsedTs records the highest timestamp we just saw. Uses >=
+// comparison on the next fetch, so no messages are lost when two land in
+// the same second; INSERT OR REPLACE absorbs the overlap.
+func setLastParsedTs(ts int64, msgID string) {
+	now := time.Now().UTC().Format(time.RFC3339)
+	_, err := db.Exec(`
+		UPDATE sync_state
+		SET last_msg_ts = ?, last_msg_id = ?, updated_at = ?
+		WHERE id = 1`, ts, msgID, now)
+	if err != nil {
+		log.Printf("setLastParsedTs: %v", err)
+	}
+}
+
+// parseWacliTs converts wacli's RFC3339 timestamp to Unix seconds.
+func parseWacliTs(s string) int64 {
+	t, err := time.Parse(time.RFC3339, s)
+	if err != nil {
+		// Try without timezone.
+		t, err = time.Parse("2006-01-02T15:04:05Z", s)
+		if err != nil {
+			return 0
+		}
+	}
+	return t.Unix()
+}
+
+// fetchMessages pulls messages from wacli-pro. If afterTs is 0, fetches
+// everything wacli has. Otherwise fetches everything with ts >= afterTs.
+func fetchMessages(afterTs int64) ([]WacliMessage, error) {
+	args := []string{"messages", "list",
+		"--json", "--limit", "100000", "--names"}
+	if afterTs > 0 {
+		after := time.Unix(afterTs, 0).UTC().Format(time.RFC3339)
+		args = append(args, "--after", after)
+	}
+
+	cmd := exec.Command("wacli-pro", args...)
 	output, err := cmd.Output()
 	if err != nil {
-		log.Printf("wacli error for %q: %v", kw, err)
-		return 0, 0, counts
+		return nil, fmt.Errorf("wacli-pro: %w", err)
 	}
 	var resp WacliResponse
 	if err := json.Unmarshal(output, &resp); err != nil {
-		log.Printf("json error for %q: %v", kw, err)
-		return 0, 0, counts
+		return nil, fmt.Errorf("json: %w", err)
 	}
-	for _, m := range resp.Data.Messages {
-		if seen[m.MsgID] {
-			continue
-		}
-		seen[m.MsgID] = true
-
-		l := ParseListing(m.MsgID, m.ChatName, m.ChatJID, m.Timestamp, m.SenderName, m.SenderJID, m.Text, m.DisplayText)
-		counts[l.Category]++
-
-		_, err := db.Exec(`
-			INSERT OR REPLACE INTO listings
-			(msg_id, chat_name, chat_jid, timestamp, sender, sender_jid, title, typology, price, price_text, location, location_raw, phone, raw_text, category)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-		`, l.MsgID, l.ChatName, l.ChatJID, l.Timestamp, l.Sender, l.SenderJID, l.Title, l.Typology, l.Price, l.PriceText, l.Location, l.LocationRaw, l.Phone, l.RawText, l.Category)
-		if err == nil {
-			inserted++
-		}
-	}
-	return inserted, len(resp.Data.Messages), counts
+	return resp.Data.Messages, nil
 }
 
-// handleRefresh runs all search keywords synchronously and returns a summary.
-func handleRefresh(w http.ResponseWriter, r *http.Request) {
-	total := 0
-	seen := map[string]bool{}
-	allCounts := map[string]int{"rental": 0, "seeker": 0, "sale": 0, "noise": 0}
-	for _, kw := range searchKeywords {
-		ins, _, counts := refreshOnce(kw, seen)
-		total += ins
-		for k, v := range counts {
-			allCounts[k] += v
+// refreshOnce does the incremental parse. If full is true, ignores
+// sync_state and reparses everything.
+func refreshOnce(full bool) (inserted int, seen int, counts map[string]int) {
+	counts = map[string]int{"rental": 0, "seeker": 0, "sale": 0, "noise": 0}
+
+	var afterTs int64
+	if !full {
+		afterTs = getLastParsedTs()
+	}
+
+	msgs, err := fetchMessages(afterTs)
+	if err != nil {
+		log.Printf("fetchMessages: %v", err)
+		return 0, 0, counts
+	}
+	seen = len(msgs)
+
+	tx, err := db.Begin()
+	if err != nil {
+		log.Printf("begin tx: %v", err)
+		return 0, 0, counts
+	}
+	stmt, err := tx.Prepare(`
+		INSERT OR REPLACE INTO listings
+		(msg_id, chat_name, chat_jid, timestamp, sender, sender_jid,
+		 title, typology, price, price_text, location, location_raw,
+		 phone, raw_text, category)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`)
+	if err != nil {
+		log.Printf("prepare: %v", err)
+		tx.Rollback()
+		return 0, 0, counts
+	}
+	defer stmt.Close()
+
+	var maxTs int64
+	var maxMsgID string
+
+	for _, m := range msgs {
+		l := ParseListing(m.MsgID, m.ChatName, m.ChatJID, m.Timestamp,
+			m.SenderName, m.SenderJID, m.Text, m.DisplayText)
+		counts[l.Category]++
+
+		ts := parseWacliTs(m.Timestamp)
+		if ts > maxTs {
+			maxTs = ts
+			maxMsgID = m.MsgID
+		}
+
+		_, err := stmt.Exec(l.MsgID, l.ChatName, l.ChatJID, l.Timestamp,
+			l.Sender, l.SenderJID, l.Title, l.Typology, l.Price, l.PriceText,
+			l.Location, l.LocationRaw, l.Phone, l.RawText, l.Category)
+		if err == nil {
+			inserted++
+		} else {
+			log.Printf("insert %s: %v", l.MsgID, err)
 		}
 	}
-	log.Printf("refresh done: inserted=%d, unique=%d, counts=%v", total, len(seen), allCounts)
+
+	if err := tx.Commit(); err != nil {
+		log.Printf("commit: %v", err)
+	}
+
+	if maxTs > 0 {
+		setLastParsedTs(maxTs, maxMsgID)
+	}
+
+	return inserted, seen, counts
+}
+
+
+// handleRefresh — synchronous. ?full=1 forces a full reparse.
+func handleRefresh(w http.ResponseWriter, r *http.Request) {
+	full := r.URL.Query().Get("full") == "1"
+
+	inserted, seen, counts := refreshOnce(full)
+	log.Printf("refresh done: full=%v inserted=%d seen=%d counts=%v",
+		full, inserted, seen, counts)
+
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Cache-Control", "no-store")
 	json.NewEncoder(w).Encode(map[string]interface{}{
-		"inserted":     total,
-		"total_unique": len(seen),
-		"counts":       allCounts,
+		"inserted":     inserted,
+		"seen":         seen,
+		"counts":       counts,
+		"full":         full,
+		"last_msg_ts":  getLastParsedTs(),
 	})
 }
 
-// handleRefreshStream is the SSE variant used by the browser. It emits a
-// "start", then "step" / "step_done" for each keyword, then "done".
+// handleRefreshStream — SSE variant used by the browser.
 func handleRefreshStream(w http.ResponseWriter, r *http.Request) {
 	flusher, ok := w.(http.Flusher)
 	if !ok {
@@ -83,10 +174,7 @@ func handleRefreshStream(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Connection", "keep-alive")
 	w.Header().Set("X-Accel-Buffering", "no")
 
-	totalKeywords := len(searchKeywords)
-	totalInserted := 0
-	seen := map[string]bool{}
-	allCounts := map[string]int{"rental": 0, "seeker": 0, "sale": 0, "noise": 0}
+	full := r.URL.Query().Get("full") == "1"
 
 	send := func(payload map[string]interface{}) {
 		b, _ := json.Marshal(payload)
@@ -94,35 +182,24 @@ func handleRefreshStream(w http.ResponseWriter, r *http.Request) {
 		flusher.Flush()
 	}
 
+	startMsg := "incremental refresh"
+	if full {
+		startMsg = "full reparse"
+	}
 	send(map[string]interface{}{
-		"type": "start", "total": totalKeywords,
-		"message": "starting refresh",
+		"type": "start", "total": 1, "message": startMsg,
 	})
 
-	for i, kw := range searchKeywords {
-		send(map[string]interface{}{
-			"type": "step", "index": i, "total": totalKeywords,
-			"keyword": kw, "inserted": totalInserted, "seen": len(seen),
-			"counts": allCounts,
-			"message": fmt.Sprintf("searching %q", kw),
-		})
-		inserted, _, counts := refreshOnce(kw, seen)
-		totalInserted += inserted
-		for k, v := range counts {
-			allCounts[k] += v
-		}
-		send(map[string]interface{}{
-			"type": "step_done", "index": i, "total": totalKeywords,
-			"keyword": kw, "inserted": totalInserted, "seen": len(seen),
-			"counts": allCounts,
-			"message": fmt.Sprintf("finished %q", kw),
-		})
-	}
+	inserted, seen, counts := refreshOnce(full)
 
 	send(map[string]interface{}{
 		"type": "done",
-		"inserted": totalInserted, "total_unique": len(seen),
-		"counts": allCounts,
-		"message": "refresh complete",
+		"inserted": inserted, "total_unique": seen,
+		"counts": counts,
+		"message": fmt.Sprintf("done — %d new, %d seen", inserted, seen),
 	})
 }
+
+// strconv is used by the URL query parsers in handlers_api.go; keep the
+// import here in case refresh adds query parsing later.
+var _ = strconv.Atoi
