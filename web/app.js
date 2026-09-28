@@ -1,3 +1,6 @@
+// Main page shell: state, boot, load, sync status, refresh, counts.
+// Table rendering lives in table.js, lightbox/media in lightbox.js.
+
 // ---------- State ----------
 
 let timer;
@@ -74,19 +77,6 @@ function onDropdownChange() {
   load();
 }
 
-function renderSortIndicators() {
-  document.querySelectorAll('th').forEach(th => {
-    const ind = th.querySelector('.sort-ind');
-    if (ind) ind.remove();
-    if (!refLatLng && th.dataset.col === sortCol) {
-      const span = document.createElement('span');
-      span.className = 'sort-ind';
-      span.textContent = sortDir === 'asc' ? '▲' : '▼';
-      th.appendChild(span);
-    }
-  });
-}
-
 // ---------- Load ----------
 
 async function load() {
@@ -99,8 +89,7 @@ async function load() {
     if (t) params.set('typology', t);
     const res = await fetch('/api/nearby?' + params.toString());
     const rows = await res.json();
-    render(rows, { proximity: true });
-    renderSortIndicators();
+    renderTable(rows, { proximity: true });
     return;
   }
 
@@ -119,119 +108,17 @@ async function load() {
 
   const res = await fetch('/api/listings?' + params.toString());
   const rows = await res.json();
-  render(rows);
-  renderSortIndicators();
+  renderTable(rows);
 }
 
-// ---------- Render ----------
+// ---------- Counts ----------
 
-function render(rows, opts) {
-  opts = opts || {};
-  const prox = !!opts.proximity;
-  const shown = rows.length;
-  const total = (window.__counts && window.__counts[currentCat]) || shown;
-  let text;
-  if (prox) {
-    text = shown + ' ' + currentCat + ' · sorted by distance';
-  } else if (total > shown) {
-    text = 'Showing ' + shown + ' of ' + total + ' ' + currentCat;
-  } else {
-    text = shown + ' ' + currentCat;
-  }
-  document.getElementById('stats').textContent = text;
-
-  if (!rows.length) {
-    document.getElementById('content').innerHTML =
-      '<div class="empty">Nothing here</div>';
-    return;
-  }
-
-  const headers = [
-    { col: 'title',     label: 'Title' },
-    { col: 'typology',  label: 'Typology' },
-    { col: 'price',     label: 'Price' },
-    { col: 'location',  label: 'Location' },
-    { col: 'phone',     label: 'Phone' },
-    { col: 'timestamp', label: 'Date' },
-    { col: 'chat_name', label: 'Source' }
-  ];
-  if (prox) headers.splice(1, 0, { col: 'distance', label: 'Distance' });
-
-  let html = '<table><thead><tr>';
-  html += '<th class="row-num" data-col="row-num">#</th>';
-  for (let k = 0; k < headers.length; k++) {
-    const h = headers[k];
-    const clickable = !prox && h.col !== 'distance';
-    html += '<th data-col="' + h.col + '"' +
-            (clickable ? ' onclick="setSort(\'' + h.col + '\')"' : '') +
-            '>' + h.label + '</th>';
-  }
-  html += '<th data-col="actions">Actions</th></tr></thead><tbody>';
-
-  for (let i = 0; i < rows.length; i++) {
-    const r = rows[i];
-    const date = r.timestamp ? r.timestamp.slice(0, 10) : '';
-    const price = r.price
-      ? r.price.toLocaleString('pt-AO') + ' Kz'
-      : (r.price_text || '—');
-
-    let locCell;
-    if (r.location) {
-      locCell = '<div>' + esc(r.location) + '</div>';
-      if (r.location_raw && r.location_raw.toLowerCase() !== r.location.toLowerCase()) {
-        locCell += '<span class="loc-raw">' + esc(r.location_raw) + '</span>';
-      }
-    } else if (r.location_raw) {
-      locCell = '<span class="loc-raw">' + esc(r.location_raw) + '</span>';
-    } else {
-      locCell = '<span class="loc-raw">—</span>';
-    }
-
-    let distCell = '';
-    if (prox) {
-      distCell = '<td><span class="dist-badge">' + fmtDistance(r.distance_km) + '</span></td>';
-    }
-
-    html += '<tr>' +
-      '<td class="row-num">' + (i + 1) + '</td>' +
-      distCell +
-      '<td class="title"><details><summary>' + titleOr(r.title, '(sem título)') + '</summary><pre>' + esc(r.raw_text) + '</pre></details></td>' +
-      '<td>' + (r.typology ? '<span class="tag">' + esc(r.typology) + '</span>' : '') + '</td>' +
-      '<td class="price">' + esc(price) + '</td>' +
-      '<td>' + locCell + '</td>' +
-      '<td>' + esc(r.phone) + '</td>' +
-      '<td>' + esc(date) + '</td>' +
-      '<td>' + esc(r.chat_name) + '</td>' +
-      '<td class="actions">' +
-        '<a class="copy-btn open-btn" href="/listing/' + encodeURIComponent(r.msg_id) + '" target="_blank">Open</a>' +
-        '<button class="copy-btn" onclick="copySearchByIndex(' + i + ')">Find in WhatsApp</button>' +
-      '</td>' +
-    '</tr>';
-  }
-
-  html += '</tbody></table>';
-  document.getElementById('content').innerHTML = html;
-  window.__rows = rows;
-
-  attachResizers();
-}
-
-function copySearchByIndex(i) {
-  const row = window.__rows[i];
-  if (row) copySearch(row);
-}
-
-async function copySearch(row) {
-  let snippet = (row.title || '').trim();
-  if (snippet.length < 10 && row.raw_text) {
-    snippet = row.raw_text.trim().slice(0, 60);
-  }
-  snippet = snippet.split('\n')[0].trim().slice(0, 60);
+async function loadCounts() {
   try {
-    await navigator.clipboard.writeText(snippet);
-    showToast('Copied. Paste into WhatsApp search (Ctrl+V).');
+    const res = await fetch('/api/counts');
+    window.__counts = await res.json();
   } catch (e) {
-    showToast('Copy failed — select the text manually.');
+    window.__counts = {};
   }
 }
 
@@ -343,22 +230,12 @@ async function refresh() {
   }
 }
 
-// ---------- Counts ----------
-
-async function loadCounts() {
-  try {
-    const res = await fetch('/api/counts');
-    window.__counts = await res.json();
-  } catch (e) {
-    window.__counts = {};
-  }
-}
-
 // ---------- Boot ----------
 
 (async function() {
   loadColumnWidths();
   wireGeoSearch();
+  initLightbox();
   loadSyncStatus();
   setInterval(loadSyncStatus, 60000);
   await loadCounts();

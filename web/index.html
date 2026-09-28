@@ -2,20 +2,20 @@
 <html lang="pt">
 <head>
 <meta charset="utf-8">
-<title>Casas para Arrendar</title>
-<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
-<link rel="stylesheet" href="/style.css"/>
-<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>WhatsApp Arrendamento — Listings</title>
+<link rel="stylesheet" href="/style.css">
 </head>
 <body>
+
 <header>
-  <h1>🏠 Casas para Arrendar</h1>
-  <div class="progress" id="progress">
-    <div class="progress-label" id="progressLabel">Starting…</div>
-    <div class="bar"><div class="bar-fill" id="barFill"></div></div>
-  </div>
+  <h1>WhatsApp Arrendamento</h1>
   <div id="syncStatus">Sync: —</div>
   <button id="refreshBtn" onclick="refresh()">Refresh from WhatsApp</button>
+  <div class="progress" id="progress">
+    <div class="progress-label" id="progressLabel">Idle</div>
+    <div class="bar"><div class="bar-fill" id="barFill"></div></div>
+  </div>
 </header>
 
 <div class="tabs">
@@ -26,51 +26,51 @@
 </div>
 
 <div class="filters">
-  <input type="text" id="q" placeholder="Search title or text..." oninput="debounceLoad()">
-  <select id="typology" onchange="load()">
-    <option value="">All typologies</option>
-    <option>T0</option><option>T1</option><option>T2</option>
-    <option>T3</option><option>T4</option><option>T5</option>
-    <option>V2</option><option>V3</option><option>V4</option><option>V5</option>
-    <option>APARTAMENTO</option><option>VIVENDA</option><option>MORADIA</option>
-    <option>QUARTO</option><option>DUPLEX</option>
-  </select>
+  <input type="text" id="q" placeholder="Search…" oninput="debounceLoad()">
+  <input type="text" id="typology" placeholder="Typology (T3, V4…)" oninput="debounceLoad()" style="max-width:160px">
+  <input type="number" id="minPrice" placeholder="Min Kz" oninput="debounceLoad()" style="max-width:120px">
+  <input type="number" id="maxPrice" placeholder="Max Kz" oninput="debounceLoad()" style="max-width:120px">
   <select id="sortBy" onchange="onDropdownChange()">
+    <option value="">— Sort —</option>
     <option value="timestamp|desc">Newest first</option>
     <option value="timestamp|asc">Oldest first</option>
-    <option value="price|asc">Price: low → high</option>
-    <option value="price|desc">Price: high → low</option>
-    <option value="location|asc">Location A → Z</option>
-    <option value="typology|asc">Typology A → Z</option>
-    <option value="title|asc">Title A → Z</option>
+    <option value="price|asc">Price ↑</option>
+    <option value="price|desc">Price ↓</option>
+    <option value="title|asc">Title A–Z</option>
+    <option value="location|asc">Location A–Z</option>
+    <option value="chat_name|asc">Source A–Z</option>
   </select>
-  <input type="number" id="minPrice" placeholder="Min Kz" oninput="debounceLoad()" style="width:120px">
-  <input type="number" id="maxPrice" placeholder="Max Kz" oninput="debounceLoad()" style="width:120px">
-  <button id="mapToggle" onclick="toggleMap()" style="background:#1a73e8;">📍 Map</button>
-  <button id="resetWidths" onclick="resetColumnWidths()" style="background:#999;">Reset widths</button>
+  <button id="mapToggle" onclick="toggleMap()">Map</button>
 </div>
 
 <div id="mapWrap">
-  <div class="geosearch" style="margin-bottom:12px;">
-    <input type="text" id="geoSearch" placeholder="Search a landmark, neighborhood, or address (e.g. Belas Shopping)" autocomplete="off">
+  <div class="geosearch">
+    <input type="text" id="geoInput" placeholder="Pesquisar localização…" autocomplete="off">
     <span class="status" id="geoStatus"></span>
     <div class="results" id="geoResults"></div>
   </div>
   <div id="map"></div>
   <div class="map-hint">
-    <span>Click the map or search above to set a reference point.</span>
-    <span>Ref: <strong id="refPoint">none</strong></span>
+    <span id="refLabel">Click the map to set a reference point.</span>
     <button onclick="clearRef()">Clear</button>
   </div>
 </div>
 
 <div class="stats" id="stats"></div>
-<div id="content"><div class="empty">Click "Refresh from WhatsApp" to load listings</div></div>
+<div id="content"></div>
 
 <div id="toast"></div>
 
+<div class="lightbox" id="lightbox">
+  <button class="lightbox-close" id="lightbox-close">×</button>
+  <div id="lightbox-content"></div>
+</div>
+
 <script src="/resize.js"></script>
 <script src="/map.js"></script>
+<script src="/lightbox.js"></script>
+<script src="/table.js"></script>
 <script src="/app.js"></script>
+
 </body>
 </html>
