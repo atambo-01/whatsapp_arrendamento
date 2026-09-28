@@ -68,3 +68,7 @@ details pre { white-space: pre-wrap; font-size: 12px; background: #f5f5f5; paddi
 .geosearch .result-item:hover, .geosearch .result-item.active { background: #eef2f7; }
 .geosearch .result-item .primary { color: #222; }
 .geosearch .result-item .secondary { color: #888; font-size: 11px; margin-top: 2px; }
+
+.actions { display: flex; gap: 6px; align-items: center; }
+.open-btn { background: #2563eb; color: #fff; text-decoration: none; display: inline-flex; align-items: center; }
+.open-btn:hover { background: #1d4ed8; }

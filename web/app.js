@@ -202,7 +202,10 @@ function render(rows, opts) {
       '<td>' + esc(r.phone) + '</td>' +
       '<td>' + esc(date) + '</td>' +
       '<td>' + esc(r.chat_name) + '</td>' +
-      '<td class="actions"><button class="copy-btn" onclick="copySearchByIndex(' + i + ')">Find in WhatsApp</button></td>' +
+      '<td class="actions">' +
+        '<a class="copy-btn open-btn" href="/listing/' + encodeURIComponent(r.msg_id) + '" target="_blank">Open</a>' +
+        '<button class="copy-btn" onclick="copySearchByIndex(' + i + ')">Find in WhatsApp</button>' +
+      '</td>' +
     '</tr>';
   }
 
