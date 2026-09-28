@@ -33,7 +33,7 @@
     display: flex;
     align-items: center;
     gap: 12px;
-    margin-bottom: 20px;
+    margin-bottom: 12px;
   }
   .back {
     display: inline-flex;
@@ -46,6 +46,27 @@
     border-radius: 6px;
   }
   .back:hover { background: var(--border); color: var(--text); }
+  .nav-bar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 16px;
+    padding: 10px 14px;
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+  }
+  .nav-bar .btn { padding: 6px 12px; }
+  .nav-bar .btn.disabled {
+    opacity: 0.4;
+    pointer-events: none;
+    cursor: default;
+  }
+  .nav-pos {
+    color: var(--muted);
+    font-size: 13px;
+  }
   .card {
     background: var(--card);
     border: 1px solid var(--border);
@@ -93,6 +114,13 @@
   .meta-item .value {
     color: var(--text);
     word-break: break-word;
+  }
+  .meta-item .value .dash {
+    color: var(--muted);
+  }
+  .meta-item .value .loc-sub {
+    color: var(--muted);
+    font-size: 12px;
   }
   .badge {
     display: inline-block;
@@ -222,6 +250,11 @@
 <div class="wrap">
   <div class="topbar">
     <a class="back" href="/">← Voltar</a>
+  </div>
+  <div class="nav-bar" id="nav-bar" style="display:none">
+    <a class="btn" id="nav-prev" href="#">← Anterior</a>
+    <span class="nav-pos" id="nav-pos"></span>
+    <a class="btn" id="nav-next" href="#">Próximo →</a>
   </div>
   <div id="content">
     <div class="loading">A carregar…</div>

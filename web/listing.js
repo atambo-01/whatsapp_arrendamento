@@ -1,10 +1,10 @@
 // Detail page for a single listing. Reads the msg_id from the URL path
 // (/listing/<id>), fetches /api/listing/<id>, and renders it.
+// Prev/Next navigate through the list stored in sessionStorage by app.js.
 
 (function () {
   'use strict';
 
-  // Extract msg_id from /listing/<id>
   var path = window.location.pathname.replace(/\/+$/, '');
   var parts = path.split('/');
   var msgId = parts[parts.length - 1];
@@ -13,6 +13,55 @@
   var lightbox = document.getElementById('lightbox');
   var lightboxContent = document.getElementById('lightbox-content');
   var lightboxClose = document.getElementById('lightbox-close');
+  var navBar = document.getElementById('nav-bar');
+  var navPrev = document.getElementById('nav-prev');
+  var navNext = document.getElementById('nav-next');
+  var navPos = document.getElementById('nav-pos');
+
+  // ---------- Prev/Next navigation state ----------
+
+  var navList = [];
+  var navIndex = -1;
+
+  function loadNavList() {
+    try {
+      var raw = sessionStorage.getItem('navList');
+      if (!raw) return;
+      navList = JSON.parse(raw);
+      if (!Array.isArray(navList)) navList = [];
+      navIndex = navList.indexOf(msgId);
+    } catch (e) {
+      navList = [];
+      navIndex = -1;
+    }
+  }
+
+  function wireNav() {
+    if (navIndex < 0 || navList.length === 0) {
+      navBar.style.display = 'none';
+      return;
+    }
+    navBar.style.display = 'flex';
+    navPos.textContent = (navIndex + 1) + ' / ' + navList.length;
+
+    if (navIndex > 0) {
+      navPrev.href = '/listing/' + encodeURIComponent(navList[navIndex - 1]);
+      navPrev.classList.remove('disabled');
+    } else {
+      navPrev.removeAttribute('href');
+      navPrev.classList.add('disabled');
+    }
+
+    if (navIndex < navList.length - 1) {
+      navNext.href = '/listing/' + encodeURIComponent(navList[navIndex + 1]);
+      navNext.classList.remove('disabled');
+    } else {
+      navNext.removeAttribute('href');
+      navNext.classList.add('disabled');
+    }
+  }
+
+  // ---------- Helpers ----------
 
   function esc(s) {
     if (s === null || s === undefined) return '';
@@ -39,6 +88,16 @@
     return n.toLocaleString('pt-PT') + ' Kz';
   }
 
+  // Renders a meta field. Always emits the wrapper so the grid keeps the
+  // same shape regardless of which fields are empty. Empty values get "—".
+  function metaItem(label, valueHtml) {
+    var v = (valueHtml && valueHtml !== '') ? valueHtml : '<span class="dash">—</span>';
+    return '<div class="meta-item"><div class="label">' + esc(label) + '</div>' +
+           '<div class="value">' + v + '</div></div>';
+  }
+
+  // ---------- Render ----------
+
   function render(data) {
     var priceStr = fmtPrice(data.price, data.price_text);
     var priceHtml = priceStr
@@ -63,22 +122,21 @@
       mediaHtml += '</div></div>';
     }
 
-    var phoneHtml = data.phone
-      ? '<div class="meta-item"><div class="label">Telefone</div><div class="value">' + esc(data.phone) + '</div></div>'
-      : '';
+    // Build each meta field — always emitted, empty values render as "—".
+    var typologyVal = data.typology ? esc(data.typology) : '';
 
-    var locationHtml = (data.location || data.location_raw)
-      ? '<div class="meta-item"><div class="label">Localização</div><div class="value">' +
-        esc(data.location || '') +
-        (data.location_raw && data.location_raw !== data.location
-          ? '<br><span style="color:var(--muted);font-size:12px">' + esc(data.location_raw) + '</span>'
-          : '') +
-        '</div></div>'
-      : '';
+    var locationVal = '';
+    if (data.location || data.location_raw) {
+      locationVal = esc(data.location || '');
+      if (data.location_raw && data.location_raw !== data.location) {
+        locationVal += '<br><span class="loc-sub">' + esc(data.location_raw) + '</span>';
+      }
+    }
 
-    var typologyHtml = data.typology
-      ? '<div class="meta-item"><div class="label">Tipologia</div><div class="value">' + esc(data.typology) + '</div></div>'
-      : '';
+    var phoneVal = data.phone ? esc(data.phone) : '';
+    var publishedVal = esc(fmtDate(data.timestamp));
+    var groupVal = data.chat_name ? esc(data.chat_name) : '';
+    var authorVal = data.sender ? esc(data.sender) : '';
 
     var html =
       '<div class="card">' +
@@ -86,12 +144,12 @@
         '<h1>' + (data.title ? esc(data.title) : '<em style="color:var(--muted)">Sem título</em>') + '</h1>' +
         priceHtml +
         '<div class="meta">' +
-          typologyHtml +
-          locationHtml +
-          phoneHtml +
-          '<div class="meta-item"><div class="label">Publicado</div><div class="value">' + esc(fmtDate(data.timestamp)) + '</div></div>' +
-          '<div class="meta-item"><div class="label">Grupo</div><div class="value">' + esc(data.chat_name || '—') + '</div></div>' +
-          '<div class="meta-item"><div class="label">Autor</div><div class="value">' + esc(data.sender || '—') + '</div></div>' +
+          metaItem('Tipologia', typologyVal) +
+          metaItem('Localização', locationVal) +
+          metaItem('Telefone', phoneVal) +
+          metaItem('Publicado', publishedVal) +
+          metaItem('Grupo', groupVal) +
+          metaItem('Autor', authorVal) +
         '</div>' +
         '<div class="actions">' +
           '<a class="btn primary" href="/">Voltar à lista</a>' +
@@ -109,7 +167,6 @@
 
     content.innerHTML = html;
 
-    // Wire up copy buttons
     var copyRaw = document.getElementById('copy-raw');
     if (copyRaw) {
       copyRaw.addEventListener('click', function () {
@@ -129,7 +186,6 @@
       });
     }
 
-    // Wire up media clicks → lightbox
     var items = content.querySelectorAll('.media-item');
     for (var j = 0; j < items.length; j++) {
       items[j].addEventListener('click', function () {
@@ -137,6 +193,8 @@
       });
     }
   }
+
+  // ---------- Lightbox ----------
 
   function openLightbox(type, src) {
     if (type === 'video') {
@@ -156,14 +214,30 @@
   lightbox.addEventListener('click', function (e) {
     if (e.target === lightbox) closeLightbox();
   });
+
+  // ---------- Keyboard shortcuts ----------
+
   document.addEventListener('keydown', function (e) {
-    if (e.key === 'Escape') closeLightbox();
+    if (e.key === 'Escape') { closeLightbox(); return; }
+    if (lightbox.classList.contains('open')) return;
+    if (e.key === 'ArrowLeft' && navIndex > 0) {
+      window.location.href = '/listing/' + encodeURIComponent(navList[navIndex - 1]);
+    } else if (e.key === 'ArrowRight' && navIndex >= 0 && navIndex < navList.length - 1) {
+      window.location.href = '/listing/' + encodeURIComponent(navList[navIndex + 1]);
+    }
   });
+
+  // ---------- Error handling ----------
 
   function showError(msg) {
     content.innerHTML = '<div class="card"><h1>Erro</h1><p>' + esc(msg) + '</p>' +
       '<div class="actions"><a class="btn primary" href="/">Voltar à lista</a></div></div>';
   }
+
+  // ---------- Boot ----------
+
+  loadNavList();
+  wireNav();
 
   if (!msgId) {
     showError('ID em falta no URL.');
