@@ -27,19 +27,51 @@ type Listing struct {
 }
 
 var (
-	reRentalVerb = regexp.MustCompile(`(?i)(arrenda[\s\-]?se|arrendam[\s\-]?se|aluga[\s\-]?se|\barrendar\s*:|\bem arrendamento\b|\bpara aluguer\b|\bpara arrendar\b|\barrendamento\b)`)
+	reRentalVerb = regexp.MustCompile(`(?i)(` +
+		`arrenda[\s\-]?se|arrendam[\s\-]?se|` +
+		`aluga[\s\-]?se|` +
+		`\barrendo\b|\balugo\b|\balugando\b|\barrendando\b|` +
+		`\bestou a alugar\b|\bestou alugando\b|` +
+		`\bestou a arrendar\b|\bestou arrendando\b|` +
+		`\barrendar\s*:|\bpara aluguer\b|\bpara arrendar\b|` +
+		`\bem arrendamento\b|\barrendamento\b|\baluguer\b` +
+		`)`)
+
 	// Seeker verbs: note the accent-tolerant "à/a" and the alternation on
 	// "estou (à|a|em) procura" — the previous version only matched the
 	// unaccented "a procura", which the seeder produces as "à procura".
-	reSeekerVerb = regexp.MustCompile(`(?i)(\bprocuro\b|\bprocuramos\b|\bprocura[\s\-]?se\b|\bpreciso (de|duma|dum)\b|\bestou (à|a|em)? ?procura\b|\bando à procura\b|\bquero uma\b|\bquero um\b|\balgu[eé]m tem\b|\bquem tem\b|\balgu[eé]m sabe\b)`)
-	reSaleVerb   = regexp.MustCompile(`(?i)(\bvende[\s\-]?se\b|\bvendo\b|\bvendemos\b|\bà venda\b|\bpara venda\b|\bvenda de\b|\bestá à venda\b)`)
-	reTypology   = regexp.MustCompile(`(?i)\b(T[\s\-]?[0-5]|V[\s\-]?[2-5]|duplex|apartamento|vivenda|moradia|quarto|residencial)\b`)
-	rePriceK     = regexp.MustCompile(`(?i)(\d{1,3}(?:[.,\s]\d{3})+|\d+)\s*(mil|kz|kzs|akz|aoa|kwanzas?)`)
-	rePriceNum   = regexp.MustCompile(`(?i)(?:plafond|pre[çc]o|valor|renda|plafon)\s*[:\-]?\s*(\d{1,3}(?:[.,\s]\d{3})*|\d+)\s*(mil)?`)
-	rePhone      = regexp.MustCompile(`\b(?:9\d{2}[\s\-]?\d{3}[\s\-]?\d{3}|9\d{8})\b`)
-	reSpam       = regexp.MustCompile(`(?i)(kwanzabet|shopee\.com\.br|chat vip|affiliates/?btag|wa\.me/message)`)
-	reMedia      = regexp.MustCompile(`^(sent (image|video|audio|sticker|document)|\(message\))$`)
-	reWord       = regexp.MustCompile(`[A-Za-zÀ-ÿ0-9]+`)
+	reSeekerVerb = regexp.MustCompile(`(?i)(` +
+		`\bprocuro\b|\bprocuramos\b|\bprocura[\s\-]?se\b|` +
+		`\bpreciso (de|duma|dum)\b|` +
+		`\bestou (à|a|em)? ?procura\b|\bando à procura\b|` +
+		`\bquero uma\b|\bquero um\b|` +
+		`\balgu[eé]m tem\b|\bquem tem\b|\balgu[eé]m sabe\b` +
+		`)`)
+
+	// Sale verbs. IMPORTANT: no \b before accented chars (à, está) — Go's
+	// regexp \b is ASCII-only and fails to match when the next rune is
+	// non-ASCII. That bug put "VIVENDA V3 À VENDA" into rentals.
+	reSaleVerb = regexp.MustCompile(`(?i)(` +
+		`\bvende[\s\-]?se\b|\bvendo\b|\bvendemos\b|` +
+		`à venda|para venda|\bvenda de\b|está à venda` +
+		`)`)
+
+	reTypology = regexp.MustCompile(`(?i)\b(` +
+		`T[\s\-]?[0-9]|V[\s\-]?[0-9]|` +
+		`duplex|apartamento|vivenda|moradia|quarto|residencial` +
+		`)\b`)
+
+	rePriceK = regexp.MustCompile(`(?i)(\d{1,3}(?:[.,\s]\d{3})+|\d+)\s*(mil|kz|kzs|akz|aoa|kwanzas?)`)
+
+	rePriceNum = regexp.MustCompile(`(?i)(?:plafond|pre[çc]o|valor|renda|plafon|mensalidade|por m[êe]s|mensal)\s*[:\-]?\s*(\d{1,3}(?:[.,\s]\d{3})*|\d+)\s*(mil)?`)
+
+	rePhone = regexp.MustCompile(`\b(?:9\d{2}[\s\-]?\d{3}[\s\-]?\d{3}|9\d{8})\b`)
+
+	reSpam = regexp.MustCompile(`(?i)(kwanzabet|shopee\.com\.br|chat vip|affiliates/?btag|wa\.me/message|bet\s?\d|cassino|aposta)`)
+
+	reMedia = regexp.MustCompile(`^(sent (image|video|audio|sticker|document)|\(message\))$`)
+
+	reWord = regexp.MustCompile(`[A-Za-zÀ-ÿ0-9]+`)
 )
 
 var locationMarkers = []string{
@@ -344,9 +376,6 @@ func isNoise(text, displayText string) bool {
 		return true
 	}
 	if reSpam.MatchString(text) {
-		return true
-	}
-	if len(strings.TrimSpace(text)) < 30 {
 		return true
 	}
 	return false
