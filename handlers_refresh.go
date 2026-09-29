@@ -10,8 +10,7 @@ import (
 	"time"
 )
 
-// getLastParsedTs returns the highest message timestamp we've already parsed,
-// stored in sync_state. First run: 0, so we fetch everything wacli has.
+// getLastParsedTs returns the highest message timestamp we've already parsed.
 func getLastParsedTs() int64 {
 	var ts int64
 	err := db.QueryRow(`SELECT last_msg_ts FROM sync_state WHERE id = 1`).Scan(&ts)
@@ -21,9 +20,6 @@ func getLastParsedTs() int64 {
 	return ts
 }
 
-// setLastParsedTs records the highest timestamp we just saw. Uses >=
-// comparison on the next fetch, so no messages are lost when two land in
-// the same second; INSERT OR REPLACE absorbs the overlap.
 func setLastParsedTs(ts int64, msgID string) {
 	now := time.Now().UTC().Format(time.RFC3339)
 	_, err := db.Exec(`
@@ -35,11 +31,9 @@ func setLastParsedTs(ts int64, msgID string) {
 	}
 }
 
-// parseWacliTs converts wacli's RFC3339 timestamp to Unix seconds.
 func parseWacliTs(s string) int64 {
 	t, err := time.Parse(time.RFC3339, s)
 	if err != nil {
-		// Try without timezone.
 		t, err = time.Parse("2006-01-02T15:04:05Z", s)
 		if err != nil {
 			return 0
@@ -48,8 +42,12 @@ func parseWacliTs(s string) int64 {
 	return t.Unix()
 }
 
-// fetchMessages pulls messages from wacli-pro. If afterTs is 0, fetches
-// everything wacli has. Otherwise fetches everything with ts >= afterTs.
+// isGroupChat returns true only for group JIDs (@g.us).
+// Filters out DMs (@s.whatsapp.net), status (@broadcast), and @lid DMs.
+func isGroupChat(jid string) bool {
+	return len(jid) > 5 && jid[len(jid)-5:] == "@g.us"
+}
+
 func fetchMessages(afterTs int64) ([]WacliMessage, error) {
 	args := []string{"messages", "list",
 		"--json", "--limit", "100000", "--names"}
@@ -70,8 +68,6 @@ func fetchMessages(afterTs int64) ([]WacliMessage, error) {
 	return resp.Data.Messages, nil
 }
 
-// refreshOnce does the incremental parse. If full is true, ignores
-// sync_state and reparses everything.
 func refreshOnce(full bool) (inserted int, seen int, counts map[string]int) {
 	counts = map[string]int{"rental": 0, "seeker": 0, "sale": 0, "noise": 0}
 
@@ -85,6 +81,15 @@ func refreshOnce(full bool) (inserted int, seen int, counts map[string]int) {
 		log.Printf("fetchMessages: %v", err)
 		return 0, 0, counts
 	}
+
+	// Only process group chats — skip DMs and status broadcasts.
+	filtered := msgs[:0]
+	for _, m := range msgs {
+		if isGroupChat(m.ChatJID) {
+			filtered = append(filtered, m)
+		}
+	}
+	msgs = filtered
 	seen = len(msgs)
 
 	tx, err := db.Begin()
@@ -141,27 +146,28 @@ func refreshOnce(full bool) (inserted int, seen int, counts map[string]int) {
 	return inserted, seen, counts
 }
 
-
-// handleRefresh — synchronous. ?full=1 forces a full reparse.
 func handleRefresh(w http.ResponseWriter, r *http.Request) {
 	full := r.URL.Query().Get("full") == "1"
 
+	start := time.Now()
 	inserted, seen, counts := refreshOnce(full)
-	log.Printf("refresh done: full=%v inserted=%d seen=%d counts=%v",
-		full, inserted, seen, counts)
+	elapsed := time.Since(start)
+
+	log.Printf("refresh done: full=%v inserted=%d seen=%d counts=%v elapsed=%s",
+		full, inserted, seen, counts, elapsed)
 
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Cache-Control", "no-store")
 	json.NewEncoder(w).Encode(map[string]interface{}{
-		"inserted":     inserted,
-		"seen":         seen,
-		"counts":       counts,
-		"full":         full,
-		"last_msg_ts":  getLastParsedTs(),
+		"inserted":    inserted,
+		"seen":        seen,
+		"counts":      counts,
+		"full":        full,
+		"last_msg_ts": getLastParsedTs(),
+		"elapsed_ms":  elapsed.Milliseconds(),
 	})
 }
 
-// handleRefreshStream — SSE variant used by the browser.
 func handleRefreshStream(w http.ResponseWriter, r *http.Request) {
 	flusher, ok := w.(http.Flusher)
 	if !ok {
@@ -200,6 +206,4 @@ func handleRefreshStream(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// strconv is used by the URL query parsers in handlers_api.go; keep the
-// import here in case refresh adds query parsing later.
 var _ = strconv.Atoi
