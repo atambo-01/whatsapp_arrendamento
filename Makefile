@@ -17,7 +17,7 @@ WACLI_DB        ?= $(HOME)/.wacli-pro/wacli.db
 DAYS  ?= 30
 LIMIT ?= 0
 
-.PHONY: build run run-dev restart stop seed seed-backfill backfill status clean
+.PHONY: build run run-dev seed seed-backfill backfill status clean
 
 build:
 	go build -o $(BIN) .
@@ -30,13 +30,6 @@ run-dev: build
 	LISTINGS_DB=$(LISTINGS_DB_DEV) go run ./seed
 	LISTINGS_DB=$(LISTINGS_DB_DEV) $(RUN)
 
-restart: build
-	systemctl --user restart whatsapp-listings
-
-stop:
-	-systemctl --user stop whatsapp-listings 2>/dev/null || true
-	-pkill -f "$(BIN)" 2>/dev/null || true
-
 seed:
 	rm -f $(LISTINGS_DB_DEV)
 	LISTINGS_DB=$(LISTINGS_DB_DEV) go run ./seed
@@ -48,10 +41,9 @@ seed-backfill:
 backfill:
 	./backfill_media.sh $(DAYS) $(LIMIT)
 
+# Simple health check of a running app
 status:
-	-systemctl --user status whatsapp-listings 2>/dev/null || true
-	@echo "---"
-	@curl -s http://localhost:$(PORT)/api/sync-status || echo "not running"
+	@curl -s http://localhost:$(PORT)/api/sync-status || echo "app not running"
 
 clean:
 	rm -f $(BIN)

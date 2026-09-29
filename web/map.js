@@ -29,7 +29,8 @@ function toggleMap() {
 }
 
 function initMap() {
-  map = L.map('map').setView([-8.90, 13.25], 11);
+  map = L.map('map', { zoomControl: false }).setView([-8.90, 13.25], 11);
+  L.control.zoom({ position: 'bottomright' }).addTo(map);
   L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
     maxZoom: 19,
     attribution: '© OpenStreetMap contributors'
