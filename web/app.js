@@ -9,6 +9,8 @@ let currentCat = 'rental';
 let sortCol = 'timestamp';
 let sortDir = 'desc';
 
+
+
 // ---------- Helpers ----------
 
 function debounceLoad() {
@@ -39,6 +41,7 @@ function fmtDistance(km) {
 
 function showToast(msg) {
   const t = document.getElementById('toast');
+  if (!t) return;
   t.textContent = msg;
   t.classList.add('show');
   setTimeout(() => t.classList.remove('show'), 1800);
@@ -243,6 +246,7 @@ async function refresh() {
 // ---------- Boot ----------
 
 (async function() {
+  themeInit();
   loadColumnWidths();
   wireGeoSearch();
   initLightbox();

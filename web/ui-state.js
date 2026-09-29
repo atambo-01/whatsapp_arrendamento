@@ -1,8 +1,11 @@
 // UI state persistence via sessionStorage.
 // Everything the user toggles (tab, sort, filters, map, ref point, scroll)
 // is saved here so navigating away and back restores the same view.
+//
+// Theme is stored separately in localStorage (survives tab close).
 
 const UI_KEY = 'uiState';
+const THEME_KEY = 'theme';
 
 const UI_DEFAULTS = {
   currentCat: 'rental',
@@ -38,7 +41,6 @@ function uiStateSave(patch) {
   } catch (e) { /* non-fatal */ }
 }
 
-// Convenience: pull a slice of UI state into the globals app.js uses.
 function uiStateApplyToGlobals() {
   const s = uiStateLoad();
   currentCat = s.currentCat;
@@ -47,7 +49,6 @@ function uiStateApplyToGlobals() {
   return s;
 }
 
-// Populate filter inputs from saved state. Call once at boot.
 function uiStateRestoreInputs() {
   const s = uiStateLoad();
   const set = function (id, val) {
@@ -60,14 +61,12 @@ function uiStateRestoreInputs() {
   set('maxPrice', s.maxPrice);
 }
 
-// Set the active tab class based on currentCat.
 function uiStateRestoreTabs() {
   document.querySelectorAll('.tab').forEach(function (t) {
     t.classList.toggle('active', t.dataset.cat === currentCat);
   });
 }
 
-// Read the current filter input values back into UI state.
 function uiStateCaptureInputs() {
   const g = function (id) {
     const el = document.getElementById(id);
@@ -81,7 +80,6 @@ function uiStateCaptureInputs() {
   });
 }
 
-// Save scroll position — called on pagehide and before navigation.
 function uiStateSaveScroll() {
   uiStateSave({ scrollY: window.scrollY || 0 });
 }
@@ -89,7 +87,6 @@ function uiStateSaveScroll() {
 function uiStateRestoreScroll() {
   const s = uiStateLoad();
   if (s.scrollY > 0) {
-    // Defer so layout is settled first.
     requestAnimationFrame(function () {
       window.scrollTo(0, s.scrollY);
     });
@@ -98,3 +95,35 @@ function uiStateRestoreScroll() {
 
 window.addEventListener('pagehide', uiStateSaveScroll);
 window.addEventListener('beforeunload', uiStateSaveScroll);
+
+// ---------- Theme ----------
+
+function themeGet() {
+  try {
+    const t = localStorage.getItem(THEME_KEY);
+    if (t === 'dark' || t === 'light') return t;
+  } catch (e) { /* non-fatal */ }
+  if (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) {
+    return 'dark';
+  }
+  return 'light';
+}
+
+function themeApply(mode) {
+  document.documentElement.setAttribute('data-theme', mode);
+  const btn = document.getElementById('themeToggle');
+  if (btn) {
+    btn.textContent = mode === 'dark' ? '☀️' : '🌙';
+    btn.title = mode === 'dark' ? 'Modo claro' : 'Modo escuro';
+  }
+}
+
+function themeInit() {
+  themeApply(themeGet());
+}
+
+function themeToggle() {
+  const next = themeGet() === 'dark' ? 'light' : 'dark';
+  try { localStorage.setItem(THEME_KEY, next); } catch (e) { /* non-fatal */ }
+  themeApply(next);
+}

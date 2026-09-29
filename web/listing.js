@@ -203,6 +203,7 @@
       '<div class="actions"><a class="btn primary" href="/">Voltar à lista</a></div></div>';
   }
 
+  themeInit();
   loadNavList();
   wireNav();
   initSendDialog();
