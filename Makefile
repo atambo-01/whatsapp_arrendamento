@@ -8,12 +8,16 @@ else
 endif
 
 # Paths
-LISTINGS_DB    ?= listings.db
+LISTINGS_DB     ?= listings.db
 LISTINGS_DB_DEV ?= listings.dev.db
-PORT           ?= 8090
-WACLI_DB       ?= $(HOME)/.wacli-pro/wacli.db
+PORT            ?= 8090
+WACLI_DB        ?= $(HOME)/.wacli-pro/wacli.db
 
-.PHONY: build run run-dev restart stop seed backfill status clean
+# Backfill args (override: make backfill DAYS=60 LIMIT=500)
+DAYS  ?= 30
+LIMIT ?= 0
+
+.PHONY: build run run-dev restart stop seed seed-backfill backfill status clean
 
 build:
 	go build -o $(BIN) .
@@ -37,8 +41,12 @@ seed:
 	rm -f $(LISTINGS_DB_DEV)
 	LISTINGS_DB=$(LISTINGS_DB_DEV) go run ./seed
 
-backfill:
+seed-backfill:
 	go run ./seed -backfill
+
+# Media backfill — see backfill_media.sh
+backfill:
+	./backfill_media.sh $(DAYS) $(LIMIT)
 
 status:
 	-systemctl --user status whatsapp-listings 2>/dev/null || true
