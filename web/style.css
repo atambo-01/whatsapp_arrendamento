@@ -276,7 +276,7 @@ tr:hover { background: var(--bg-hover); }
   top: 100%;
   left: 0;
   right: 0;
-  z-index: 500;
+  z-index: 1100;
   background: var(--bg-alt);
   border: 1px solid var(--border);
   border-radius: 4px;
@@ -500,3 +500,50 @@ tr:hover { background: var(--bg-hover); }
 .send-submit:hover { background: var(--accent-hover); }
 .send-submit:disabled { background: var(--text-faint); cursor: wait; }
 .send-hint { font-size: 11px; color: var(--text-faint); text-align: right; margin-top: 6px; }
+
+/* ---------- Pagination ---------- */
+.pagination {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 20px 24px;
+  background: var(--bg-alt);
+  border-top: 1px solid var(--border);
+}
+.page-btn {
+  background: var(--accent);
+  color: #fff;
+  border: none;
+  padding: 8px 16px;
+  border-radius: 4px;
+  font-size: 13px;
+  cursor: pointer;
+}
+.page-btn:hover:not(:disabled) { background: var(--accent-hover); }
+.page-btn:disabled {
+  background: var(--bg-hover);
+  color: var(--text-faint);
+  cursor: default;
+}
+.page-picker {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--text-muted);
+}
+.page-input {
+  width: 60px;
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  font-size: 13px;
+  text-align: center;
+  background: var(--bg-input);
+  color: var(--text);
+  font-family: inherit;
+}
+.page-total {
+  color: var(--text-muted);
+}

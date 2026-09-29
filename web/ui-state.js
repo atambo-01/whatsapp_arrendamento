@@ -11,6 +11,8 @@ const UI_DEFAULTS = {
   currentCat: 'rental',
   sortCol: 'timestamp',
   sortDir: 'desc',
+  currentPage: 1,
+  perPage: 50,
   q: '',
   typology: '',
   minPrice: '',
@@ -46,6 +48,8 @@ function uiStateApplyToGlobals() {
   currentCat = s.currentCat;
   sortCol = s.sortCol;
   sortDir = s.sortDir;
+  currentPage = s.currentPage;
+  perPage = s.perPage;
   return s;
 }
 

@@ -1,27 +1,32 @@
 // Table rendering for the main listings page.
+// Accepts a paginated response: {rows, total, page, per_page, total_pages}.
 // Two-panel inline expansion on row-number click: raw text left, thumbnails right.
-// Thumbnails open the lightbox (see lightbox.js). Clicking elsewhere in the
-// panel navigates to the detail page.
 
 const MEDIA_CACHE = {};
 const THUMB_LIMIT = 6;
 
-function renderTable(rows, opts) {
+function renderTable(data, opts) {
   opts = opts || {};
   const prox = !!opts.proximity;
-  const shown = rows.length;
-  const total = (window.__counts && window.__counts[currentCat]) || shown;
-  let text;
-  if (prox) {
-    text = shown + ' ' + currentCat + ' · sorted by distance';
-  } else if (total > shown) {
-    text = 'Showing ' + shown + ' of ' + total + ' ' + currentCat;
-  } else {
-    text = shown + ' ' + currentCat;
-  }
-  document.getElementById('stats').textContent = text;
 
-  if (!rows.length) {
+  const rows = data.rows || [];
+  const total = data.total || 0;
+  const page = data.page || 1;
+  const totalPages = data.total_pages || 1;
+
+  let statText;
+  if (total === 0) {
+    statText = 'No ' + currentCat;
+  } else {
+    const start = (page - 1) * (data.per_page || 50) + 1;
+    const end = start + rows.length - 1;
+    statText = 'Showing ' + start + '–' + end + ' of ' + total + ' ' + currentCat;
+    if (prox) statText += ' · sorted by distance';
+    if (totalPages > 1) statText += ' · page ' + page + ' of ' + totalPages;
+  }
+  document.getElementById('stats').textContent = statText;
+
+  if (rows.length === 0) {
     document.getElementById('content').innerHTML = '<div class="empty">Nothing here</div>';
     return;
   }
@@ -76,9 +81,10 @@ function renderTable(rows, opts) {
 
     const detailUrl = '/listing/' + encodeURIComponent(r.msg_id);
     const panelId = 'panel-' + i;
+    const globalIdx = (page - 1) * (data.per_page || 50) + i + 1;
 
     html += '<tr data-idx="' + i + '">' +
-      '<td class="row-num" onclick="toggleRow(\'' + panelId + '\',\'' + r.msg_id + '\')" title="Expandir/colapsar">' + (i + 1) + '</td>' +
+      '<td class="row-num" onclick="toggleRow(\'' + panelId + '\',\'' + r.msg_id + '\')" title="Expandir/colapsar">' + globalIdx + '</td>' +
       distCell +
       '<td class="title"><a class="title-link" href="' + detailUrl + '">' + titleOr(r.title, '(sem título)') + '</a></td>' +
       '<td>' + (r.typology ? '<span class="tag">' + esc(r.typology) + '</span>' : '') + '</td>' +
@@ -101,6 +107,20 @@ function renderTable(rows, opts) {
   }
 
   html += '</tbody></table>';
+
+  if (totalPages > 1) {
+    html += '<div class="pagination">';
+    html += '<button class="page-btn" onclick="gotoPage(' + (page - 1) + ')"' +
+            (page === 1 ? ' disabled' : '') + '>« Anterior</button>';
+    html += '<span class="page-picker">';
+    html += '<input type="text" inputmode="numeric" pattern="[0-9]*" class="page-input" id="pageInput" value="' + page + '" onkeydown="pageInputKey(event)" onblur="pageInputBlur()" onfocus="this.select()">';
+    html += '<span class="page-total">/ ' + totalPages + '</span>';
+    html += '</span>';
+    html += '<button class="page-btn" onclick="gotoPage(' + (page + 1) + ')"' +
+            (page === totalPages ? ' disabled' : '') + '>Próxima »</button>';
+    html += '</div>';
+  }
+
   document.getElementById('content').innerHTML = html;
   window.__rows = rows;
 
@@ -109,6 +129,26 @@ function renderTable(rows, opts) {
   } catch (e) { /* non-fatal */ }
 
   attachResizers();
+}
+
+function pageInputKey(e) {
+  if (e.key === 'Enter') {
+    e.preventDefault();
+    e.target.blur();
+  }
+}
+
+function pageInputBlur() {
+  const inp = document.getElementById('pageInput');
+  if (!inp) return;
+  const v = parseInt(inp.value, 10);
+  const max = parseInt(inp.getAttribute('max') || '999999', 10);
+  const totalPages = window.__totalPages || max;
+  if (!isNaN(v) && v >= 1 && v <= totalPages && v !== currentPage) {
+    gotoPage(v);
+  } else {
+    inp.value = currentPage;
+  }
 }
 
 function toggleRow(panelId, msgId) {
@@ -163,7 +203,7 @@ function renderPanel(panel, row, media) {
       const badge = m.type === 'video' ? '<span class="thumb-video">▶</span>' : '';
       thumbsHtml += '<div class="thumb" onclick="event.stopPropagation(); openLightbox(\'' +
         esc(row.msg_id) + '\',' + i + ')">' +
-        '<img src="' + esc(m.url) + '" loading="lazy" alt="">' +
+        '<img src="' + esc(m.url) + '" loading="lazy" alt="" onerror="this.parentElement.style.display=\'none\'">' +
         badge +
         '</div>';
     }

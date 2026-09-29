@@ -8,8 +8,8 @@ let timer;
 let currentCat = 'rental';
 let sortCol = 'timestamp';
 let sortDir = 'desc';
-
-
+let currentPage = 1;
+let perPage = 50;
 
 // ---------- Helpers ----------
 
@@ -17,6 +17,8 @@ function debounceLoad() {
   clearTimeout(timer);
   timer = setTimeout(function () {
     uiStateCaptureInputs();
+    currentPage = 1;
+    uiStateSave({ currentPage: 1 });
     load();
   }, 300);
 }
@@ -51,8 +53,9 @@ function showToast(msg) {
 
 function setCat(cat) {
   currentCat = cat;
+  currentPage = 1;
   document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.cat === cat));
-  uiStateSave({ currentCat: cat });
+  uiStateSave({ currentCat: cat, currentPage: 1 });
   load();
 }
 
@@ -64,8 +67,9 @@ function setSort(col) {
     sortCol = col;
     sortDir = 'asc';
   }
+  currentPage = 1;
   syncDropdown();
-  uiStateSave({ sortCol: sortCol, sortDir: sortDir });
+  uiStateSave({ sortCol: sortCol, sortDir: sortDir, currentPage: 1 });
   load();
 }
 
@@ -86,8 +90,19 @@ function onDropdownChange() {
   const parts = val.split('|');
   sortCol = parts[0];
   sortDir = parts[1];
-  uiStateSave({ sortCol: sortCol, sortDir: sortDir });
+  currentPage = 1;
+  uiStateSave({ sortCol: sortCol, sortDir: sortDir, currentPage: 1 });
   load();
+}
+
+// ---------- Pagination ----------
+
+function gotoPage(p) {
+  if (p < 1) p = 1;
+  currentPage = p;
+  uiStateSave({ currentPage: p });
+  load();
+  window.scrollTo({ top: 0, behavior: 'smooth' });
 }
 
 // ---------- Load ----------
@@ -98,11 +113,13 @@ async function load() {
     params.set('lat', refLatLng.lat);
     params.set('lng', refLatLng.lng);
     params.set('category', currentCat);
+    params.set('page', currentPage);
+    params.set('per_page', perPage);
     const t = document.getElementById('typology').value;
     if (t) params.set('typology', t);
     const res = await fetch('/api/nearby?' + params.toString());
-    const rows = await res.json();
-    renderTable(rows, { proximity: true });
+    const data = await res.json();
+    renderTable(data, { proximity: true });
     return;
   }
 
@@ -110,6 +127,8 @@ async function load() {
   params.set('category', currentCat);
   params.set('sort_col', sortCol);
   params.set('sort_dir', sortDir);
+  params.set('page', currentPage);
+  params.set('per_page', perPage);
   const q = document.getElementById('q').value;
   const t = document.getElementById('typology').value;
   const mn = document.getElementById('minPrice').value;
@@ -120,8 +139,8 @@ async function load() {
   if (mx) params.set('max_price', mx);
 
   const res = await fetch('/api/listings?' + params.toString());
-  const rows = await res.json();
-  renderTable(rows);
+  const data = await res.json();
+  renderTable(data);
 }
 
 // ---------- Counts ----------
@@ -251,13 +270,11 @@ async function refresh() {
   wireGeoSearch();
   initLightbox();
 
-  // Restore persisted UI state before the first load.
   const saved = uiStateApplyToGlobals();
   uiStateRestoreInputs();
   uiStateRestoreTabs();
   syncDropdown();
 
-  // Restore map state if it was open.
   if (typeof restoreMapState === 'function') {
     restoreMapState(saved);
   }
@@ -266,9 +283,9 @@ async function refresh() {
   setInterval(loadSyncStatus, 60000);
   await loadCounts();
   try {
-    const res = await fetch('/api/listings?category=rental');
-    const rows = await res.json();
-    if (rows.length === 0) {
+    const res = await fetch('/api/listings?category=rental&page=1&per_page=1');
+    const data = await res.json();
+    if (!data.rows || data.rows.length === 0) {
       refresh();
     } else {
       await load();

@@ -3,6 +3,7 @@ package main
 import (
 	"database/sql"
 	"encoding/json"
+	"math"
 	"net/http"
 	"os"
 	"os/exec"
@@ -10,6 +11,9 @@ import (
 	"strconv"
 	"strings"
 )
+
+const defaultPerPage = 50
+const maxPerPage = 500
 
 func handleListings(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
@@ -21,6 +25,19 @@ func handleListings(w http.ResponseWriter, r *http.Request) {
 	category := q.Get("category")
 	sortCol := q.Get("sort_col")
 	sortDir := q.Get("sort_dir")
+
+	page := 1
+	if s := q.Get("page"); s != "" {
+		if n, err := strconv.Atoi(s); err == nil && n > 0 {
+			page = n
+		}
+	}
+	perPage := defaultPerPage
+	if s := q.Get("per_page"); s != "" {
+		if n, err := strconv.Atoi(s); err == nil && n > 0 && n <= maxPerPage {
+			perPage = n
+		}
+	}
 
 	if category == "" {
 		category = "rental"
@@ -43,42 +60,63 @@ func handleListings(w http.ResponseWriter, r *http.Request) {
 		sortDir = "desc"
 	}
 
-	query := "SELECT msg_id, chat_name, chat_jid, timestamp, sender, sender_jid, title, typology, price, price_text, location, location_raw, phone, raw_text, category FROM listings WHERE category = ?"
+	// Build the WHERE clause once; reuse for count and page queries.
+	where := "WHERE category = ? AND chat_jid LIKE '%@g.us'"
 	args := []interface{}{category}
 
 	if typology != "" {
-		query += " AND typology = ?"
+		where += " AND typology = ?"
 		args = append(args, typology)
 	}
 	if location != "" {
-		query += " AND location = ?"
+		where += " AND location = ?"
 		args = append(args, location)
 	}
 	if minPrice != "" {
 		if n, err := strconv.Atoi(minPrice); err == nil {
-			query += " AND price >= ?"
+			where += " AND price >= ?"
 			args = append(args, n)
 		}
 	}
 	if maxPrice != "" {
 		if n, err := strconv.Atoi(maxPrice); err == nil {
-			query += " AND price <= ?"
+			where += " AND price <= ?"
 			args = append(args, n)
 		}
 	}
 	if search != "" {
-		query += " AND (raw_text LIKE ? OR title LIKE ?)"
+		where += " AND (raw_text LIKE ? OR title LIKE ?)"
 		s := "%" + search + "%"
 		args = append(args, s, s)
 	}
 
-	if sortDir == "asc" {
-		query += " ORDER BY CASE WHEN " + sortCol + " IS NULL OR " + sortCol + " = '' THEN 1 ELSE 0 END, " + sortCol + " ASC, timestamp DESC LIMIT 500"
-	} else {
-		query += " ORDER BY CASE WHEN " + sortCol + " IS NULL OR " + sortCol + " = '' THEN 1 ELSE 0 END, " + sortCol + " DESC, timestamp DESC LIMIT 500"
+	// Count total matching rows.
+	var total int
+	if err := db.QueryRow("SELECT COUNT(*) FROM listings "+where, args...).Scan(&total); err != nil {
+		http.Error(w, err.Error(), 500)
+		return
 	}
 
-	rows, err := db.Query(query, args...)
+	totalPages := int(math.Ceil(float64(total) / float64(perPage)))
+	if totalPages < 1 {
+		totalPages = 1
+	}
+	if page > totalPages {
+		page = totalPages
+	}
+	offset := (page - 1) * perPage
+
+	// Page query.
+	query := "SELECT msg_id, chat_name, chat_jid, timestamp, sender, sender_jid, title, typology, price, price_text, location, location_raw, phone, raw_text, category FROM listings " + where
+	if sortDir == "asc" {
+		query += " ORDER BY CASE WHEN " + sortCol + " IS NULL OR " + sortCol + " = '' THEN 1 ELSE 0 END, " + sortCol + " ASC, timestamp DESC"
+	} else {
+		query += " ORDER BY CASE WHEN " + sortCol + " IS NULL OR " + sortCol + " = '' THEN 1 ELSE 0 END, " + sortCol + " DESC, timestamp DESC"
+	}
+	query += " LIMIT ? OFFSET ?"
+	pageArgs := append(append([]interface{}{}, args...), perPage, offset)
+
+	rows, err := db.Query(query, pageArgs...)
 	if err != nil {
 		http.Error(w, err.Error(), 500)
 		return
@@ -112,9 +150,16 @@ func handleListings(w http.ResponseWriter, r *http.Request) {
 	if out == nil {
 		out = []Row{}
 	}
+
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Cache-Control", "no-store")
-	json.NewEncoder(w).Encode(out)
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"rows":        out,
+		"total":       total,
+		"page":        page,
+		"per_page":    perPage,
+		"total_pages": totalPages,
+	})
 }
 
 func handleNearby(w http.ResponseWriter, r *http.Request) {
@@ -141,9 +186,22 @@ func handleNearby(w http.ResponseWriter, r *http.Request) {
 	}
 	typology := q.Get("typology")
 
+	page := 1
+	if s := q.Get("page"); s != "" {
+		if n, err := strconv.Atoi(s); err == nil && n > 0 {
+			page = n
+		}
+	}
+	perPage := defaultPerPage
+	if s := q.Get("per_page"); s != "" {
+		if n, err := strconv.Atoi(s); err == nil && n > 0 && n <= maxPerPage {
+			perPage = n
+		}
+	}
+
 	query := `SELECT msg_id, chat_name, timestamp, sender, title, typology,
 	                 price, price_text, location, location_raw, phone, raw_text, category
-	          FROM listings WHERE category = ?`
+	          FROM listings WHERE category = ? AND chat_jid LIKE '%@g.us'`
 	args := []interface{}{category}
 	if typology != "" {
 		query += " AND typology = ?"
@@ -176,7 +234,8 @@ func handleNearby(w http.ResponseWriter, r *http.Request) {
 		Lng         float64 `json:"lng"`
 	}
 
-	var out []Row
+	// Nearby sorts in-memory (haversine), then paginates.
+	var all []Row
 	for rows.Next() {
 		var r Row
 		rows.Scan(&r.MsgID, &r.ChatName, &r.Timestamp, &r.Sender, &r.Title,
@@ -192,23 +251,43 @@ func handleNearby(w http.ResponseWriter, r *http.Request) {
 		if maxKm > 0 && r.DistanceKm > maxKm {
 			continue
 		}
-		out = append(out, r)
+		all = append(all, r)
 	}
 
-	sort.Slice(out, func(i, j int) bool {
-		return out[i].DistanceKm < out[j].DistanceKm
+	sort.Slice(all, func(i, j int) bool {
+		return all[i].DistanceKm < all[j].DistanceKm
 	})
 
-	if len(out) > 500 {
-		out = out[:500]
+	total := len(all)
+	totalPages := int(math.Ceil(float64(total) / float64(perPage)))
+	if totalPages < 1 {
+		totalPages = 1
 	}
-	if out == nil {
-		out = []Row{}
+	if page > totalPages {
+		page = totalPages
+	}
+	start := (page - 1) * perPage
+	end := start + perPage
+	if end > total {
+		end = total
+	}
+	var pageRows []Row
+	if start < total {
+		pageRows = all[start:end]
+	}
+	if pageRows == nil {
+		pageRows = []Row{}
 	}
 
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Cache-Control", "no-store")
-	json.NewEncoder(w).Encode(out)
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"rows":        pageRows,
+		"total":       total,
+		"page":        page,
+		"per_page":    perPage,
+		"total_pages": totalPages,
+	})
 }
 
 func handleSyncStatus(w http.ResponseWriter, r *http.Request) {
@@ -261,7 +340,7 @@ func handleSyncStatus(w http.ResponseWriter, r *http.Request) {
 }
 
 func handleCounts(w http.ResponseWriter, r *http.Request) {
-	rows, err := db.Query(`SELECT category, COUNT(*) FROM listings GROUP BY category`)
+	rows, err := db.Query(`SELECT category, COUNT(*) FROM listings WHERE chat_jid LIKE '%@g.us' GROUP BY category`)
 	if err != nil {
 		http.Error(w, err.Error(), 500)
 		return
