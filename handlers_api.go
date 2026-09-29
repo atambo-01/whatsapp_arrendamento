@@ -15,6 +15,11 @@ import (
 const defaultPerPage = 50
 const maxPerPage = 500
 
+// Base filter applied to every listings query: only group chats with
+// non-empty raw_text. Empty messages (media-only stubs, blank replies)
+// have nothing to show, so they're hidden from the UI.
+const baseListingsFilter = "category = ? AND chat_jid LIKE '%@g.us' AND raw_text IS NOT NULL AND TRIM(raw_text) != ''"
+
 func handleListings(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	typology := q.Get("typology")
@@ -60,8 +65,7 @@ func handleListings(w http.ResponseWriter, r *http.Request) {
 		sortDir = "desc"
 	}
 
-	// Build the WHERE clause once; reuse for count and page queries.
-	where := "WHERE category = ? AND chat_jid LIKE '%@g.us'"
+	where := "WHERE " + baseListingsFilter
 	args := []interface{}{category}
 
 	if typology != "" {
@@ -90,7 +94,6 @@ func handleListings(w http.ResponseWriter, r *http.Request) {
 		args = append(args, s, s)
 	}
 
-	// Count total matching rows.
 	var total int
 	if err := db.QueryRow("SELECT COUNT(*) FROM listings "+where, args...).Scan(&total); err != nil {
 		http.Error(w, err.Error(), 500)
@@ -106,7 +109,6 @@ func handleListings(w http.ResponseWriter, r *http.Request) {
 	}
 	offset := (page - 1) * perPage
 
-	// Page query.
 	query := "SELECT msg_id, chat_name, chat_jid, timestamp, sender, sender_jid, title, typology, price, price_text, location, location_raw, phone, raw_text, category FROM listings " + where
 	if sortDir == "asc" {
 		query += " ORDER BY CASE WHEN " + sortCol + " IS NULL OR " + sortCol + " = '' THEN 1 ELSE 0 END, " + sortCol + " ASC, timestamp DESC"
@@ -201,7 +203,7 @@ func handleNearby(w http.ResponseWriter, r *http.Request) {
 
 	query := `SELECT msg_id, chat_name, timestamp, sender, title, typology,
 	                 price, price_text, location, location_raw, phone, raw_text, category
-	          FROM listings WHERE category = ? AND chat_jid LIKE '%@g.us'`
+	          FROM listings WHERE ` + baseListingsFilter
 	args := []interface{}{category}
 	if typology != "" {
 		query += " AND typology = ?"
@@ -234,7 +236,6 @@ func handleNearby(w http.ResponseWriter, r *http.Request) {
 		Lng         float64 `json:"lng"`
 	}
 
-	// Nearby sorts in-memory (haversine), then paginates.
 	var all []Row
 	for rows.Next() {
 		var r Row
@@ -340,7 +341,11 @@ func handleSyncStatus(w http.ResponseWriter, r *http.Request) {
 }
 
 func handleCounts(w http.ResponseWriter, r *http.Request) {
-	rows, err := db.Query(`SELECT category, COUNT(*) FROM listings WHERE chat_jid LIKE '%@g.us' GROUP BY category`)
+	rows, err := db.Query(`SELECT category, COUNT(*) FROM listings
+		WHERE chat_jid LIKE '%@g.us'
+		  AND raw_text IS NOT NULL
+		  AND TRIM(raw_text) != ''
+		GROUP BY category`)
 	if err != nil {
 		http.Error(w, err.Error(), 500)
 		return
