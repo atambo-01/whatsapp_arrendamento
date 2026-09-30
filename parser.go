@@ -27,13 +27,163 @@ type Listing struct {
 	Category    string
 }
 
-// Rental price range (Kz / month). Outside → flagged, not hidden.
 const (
 	RentalMin = 15000
 	RentalMax = 700000
 	SaleMin   = 1000000
 	SaleMax   = 50000000
+	HeadWords = 10
+	TypologyHeadWords = 20
 )
+
+type KeywordClass struct {
+	Name       string
+	Words      []string
+	Verdict    string
+	IsOverride bool
+	WeakHome   bool
+}
+
+var keywordClasses = []KeywordClass{
+	{
+		Name: "car",
+		Words: []string{
+			"toyota", "mercedes", "bmw", "audi", "nissan", "suzuki",
+			"mitsubishi", "hyundai", "kia", "ford", "chevrolet",
+			"volkswagen", "vw", "honda", "mazda", "peugeot", "renault",
+			"land", "cruiser", "prado", "hilux", "titan", "g63", "v8",
+			"v6", "gxr", "gx", "rav4", "rover", "vitara", "camry",
+			"corolla", "motor", "gasolina", "diesel",
+			"matrícula", "matricula", "cilindrada", "jantes", "pneus",
+			"carro", "carros", "viatura", "veículo", "veiculo", "auto",
+			"moto", "camião", "caminhao", "carrinha",
+		},
+		Verdict:    "noise",
+		IsOverride: true,
+		WeakHome:   true,
+	},
+	{
+		Name: "phone",
+		Words: []string{
+			"iphone", "samsung", "galaxy", "huawei", "xiaomi", "redmi",
+			"tecno", "infinix", "itel", "oppo", "vivo", "realme",
+			"pixel", "smartphone", "telemóvel", "telefone",
+			"airpods", "fones", "auriculares",
+		},
+		Verdict:    "noise",
+		IsOverride: true,
+		WeakHome:   true,
+	},
+	{
+		Name: "electronics",
+		Words: []string{
+			"macbook", "laptop", "notebook", "computador", "desktop",
+			"tablet", "ipad", "televisão", "televisao", "tv",
+			"playstation", "ps4", "ps5", "xbox", "nintendo", "consola",
+			"smartwatch", "monitor", "impressora",
+			"processador", "memória", "memoria", "gpu", "placa",
+		},
+		Verdict:    "noise",
+		IsOverride: true,
+		WeakHome:   true,
+	},
+	{
+		Name: "furniture",
+		Words: []string{
+			"sofá", "sofa", "cama", "mesa", "cadeira", "armário",
+			"armario", "roupeiro", "estante", "colchão", "colchao",
+			"geladeira", "frigorífico", "frigorifico", "máquina",
+			"maquina", "fogão", "fogao", "microondas", "exaustor",
+		},
+		Verdict:    "noise",
+		IsOverride: true,
+		WeakHome:   true,
+	},
+	{
+		Name: "services",
+		Words: []string{
+			"canalizador", "eletricista", "electricista", "pintor",
+			"pedreiro", "carpinteiro", "serralheiro",
+			"mudança", "mudanca", "frete",
+			"detona", "desbaratiza", "pragas",
+		},
+		Verdict:    "noise",
+		IsOverride: true,
+		WeakHome:   true,
+	},
+	{
+		Name: "home",
+		Words: []string{
+			"casa", "vivenda", "moradia", "apartamento", "apart",
+			"quarto", "cozinha", "sala", "wc", "quintal", "varanda",
+			"suite", "suíte", "anexo", "escritório", "escritorio",
+			"terreno", "lote", "loja", "armazém", "armazem", "quinta",
+			"residencial", "condomínio", "condominio", "prédio", "predio",
+			"edifício", "edificio", "andar", "teto", "telhado",
+			"piscina", "garagem", "cave", "canalização", "canalizacao",
+			"mosaico", "ladrilhado", "kitnet", "flat", "villa",
+		},
+		Verdict:    "",
+		IsOverride: false,
+		WeakHome:   false,
+	},
+}
+
+func classByName(name string) KeywordClass {
+	for _, c := range keywordClasses {
+		if c.Name == name {
+			return c
+		}
+	}
+	return KeywordClass{}
+}
+
+func firstNWords(s string, n int) string {
+	words := strings.Fields(s)
+	if len(words) <= n {
+		return s
+	}
+	return strings.Join(words[:n], " ")
+}
+
+func containsAnyKeyword(text string, class KeywordClass) (string, bool) {
+	if len(class.Words) == 0 {
+		return "", false
+	}
+	lower := strings.ToLower(text)
+	for _, w := range class.Words {
+		if containsWord(lower, w) {
+			return w, true
+		}
+	}
+	return "", false
+}
+
+func containsWord(haystack, needle string) bool {
+	needle = strings.ToLower(needle)
+	idx := 0
+	for {
+		i := strings.Index(haystack[idx:], needle)
+		if i < 0 {
+			return false
+		}
+		pos := idx + i
+		end := pos + len(needle)
+		left := pos == 0 || !isWordChar(haystack[pos-1])
+		right := end == len(haystack) || !isWordChar(haystack[end])
+		if left && right {
+			return true
+		}
+		idx = pos + 1
+	}
+}
+
+func isWordChar(b byte) bool {
+	return (b >= 'a' && b <= 'z') ||
+		(b >= 'A' && b <= 'Z') ||
+		(b >= '0' && b <= '9') ||
+		b == '_'
+}
 
 var (
 	reRentalStrong = regexp.MustCompile(`(?i)(` +
@@ -62,12 +212,14 @@ var (
 		`\bprocuro\b|\bprocuramos\b|\bprocurando\b|\bprocura[\s\-]?se\b|` +
 		`\bestou (à|a|em)? ?procura\b|\bando (à|a)? ?procura\b|` +
 		`\bestou a procurar\b|\bestou procurando\b|` +
-		`\bpreciso (de|duma|dum|duns|dumas)\b|\bprecisamos (de|duma|dum)\b|` +
-		`\bquero (uma|um|uns|umas)\b|\bqueremos (uma|um)\b|` +
+		`\bpreciso (de|duma|dum|duns|dumas|um|uma)\b|` +
+		`\bprecisamos (de|duma|dum|um|uma)\b|` +
+		`\bquero (uma|um|uns|umas|comprar|arrendar|alugar)\b|` +
+		`\bqueremos (uma|um|comprar)\b|` +
 		`\balgu[eé]m tem\b|\balgu[eé]m sabe\b|\balgu[eé]m arranja\b|\balgu[eé]m conhece\b|` +
 		`\bquem tem\b|\bquem sabe\b|\bquem arranja\b|\bquem conhece\b|` +
 		`\barranja[\s\-]?se\b|\barranjem\b|` +
-		`\bnecessito (de|duma|dum)\b|\bnecessitamos (de|duma|dum)\b|` +
+		`\bnecessito (de|duma|dum|um|uma)\b|\bnecessitamos (de|duma|dum)\b|` +
 		`\btou à procura\b|\btou a procura\b|` +
 		`\bsolicito\b|\bsolicitaç` +
 		`)`)
@@ -87,37 +239,32 @@ var (
 		`\bvender\b|\bvende\b|\bvendes\b` +
 		`)`)
 
-	reCar = regexp.MustCompile(`(?i)(` +
-		`mercedes|land\s?cruiser|nissan|suzuki|toyota|hilux|titan|` +
-		`grand\s?vitara|prado|rav4|range\s?rover|bmw|audi|` +
-		`\bv8\b|\bv6\b|\bg63\b|\bgxr?\b|\bgx\b|` +
-		`motor\s+(selado|avariado|seco)|caixa\s+autom|` +
-		`combust[íi]vel|gasolina|diesel|matr[íi]cula|` +
-		`quil[oó]metros?|kms?\s*\d|` +
-		`carro[s]?\b|ve[íi]culo|viatura` +
-		`)`)
-
+	// Typology without generic words that trip car ads. "casa", "terreno",
+	// "loja" only match when followed by a quantifier or preceded by a
+	// property-intent marker.
 	reTypology = regexp.MustCompile(`(?i)\b(` +
 		`T[\s\-]?[0-9]|V[\s\-]?[0-9]|` +
 		`duplex|triplex|` +
-		`apartamento|apart|apº|ap\.|apto|` +
+		`apartamento|apart|apº|apto|` +
 		`vivenda|moradia|villa|` +
-		`quarto|kitnet|kit[\s\-]?net|flat|studio|estúdio|` +
-		`loja|armazém|armazem|escritório|escritorio|` +
-		`terreno|lote|quinta|` +
-		`residencial|casa` +
+		`kitnet|kit[\s\-]?net|flat|studio|estúdio|` +
+		`residencial` +
 		`)\b`)
 
-	// Currency-suffixed price. Handles "50 mil", "450 kz",
-	// "45.000.000,00 Kz", "100 'MIL", "250k", "300M", "1 milhão".
+	// Contextual typology — generic words that only count when near a
+	// price, verb, or in the head zone.
+	reTypologyGeneric = regexp.MustCompile(`(?i)\b(` +
+		`casa|quarto|terreno|lote|loja|quinta|armazém|armazem` +
+		`)\b`)
+
+	reURL = regexp.MustCompile(`(?i)https?://\S+|www\.\S+`)
+
 	rePriceK = regexp.MustCompile(`(?i)` +
 		`(\d{1,3}(?:[.,\s]\d{3})+|\d+)` +
 		`(?:[.,]\d{1,2})?` +
 		`\s*['\x60]?\s*` +
 		`(milh(?:ão|ões|ao|oes)|mil|kzs?|k\b|akz|aoa|usd|\$|m\b)`)
 
-	// Leading-marker price. Handles "preço: 45", "renda 230 mil",
-	// "mensalidade 45", "plafon 250k", "plafond 300M".
 	rePriceNum = regexp.MustCompile(`(?i)` +
 		`(?:plafond|plafon|pre[çc]o|valor|renda|mensalidade|por m[êe]s|mensal)\s*[:\-]?\s*` +
 		`(\d{1,3}(?:[.,\s]\d{3})*|\d+)` +
@@ -126,7 +273,7 @@ var (
 
 	rePhone = regexp.MustCompile(`\b(?:9\d{2}[\s\-]?\d{3}[\s\-]?\d{3}|9\d{8})\b`)
 
-	reSpam = regexp.MustCompile(`(?i)(kwanzabet|shopee\.com\.br|chat vip|affiliates/?btag|wa\.me/message|bet\s?\d|cassino|aposta|desbaratiza|detona)`)
+	reSpam = regexp.MustCompile(`(?i)(kwanzabet|shopee\.com\.br|chat vip|affiliates/?btag|wa\.me/message|bet\s?\d|cassino|aposta|viga\s+\d+|delay\s+spray)`)
 
 	reMedia = regexp.MustCompile(`^(sent (image|video|audio|sticker|document)|\(message\)|image|video|audio)$`)
 
@@ -177,9 +324,6 @@ var knownLocations = []string{
 
 var numberedBases = []string{"golf", "golfe", "golfo", "zango", "camama", "calemba"}
 
-// applyMultiplier applies the currency-suffix multiplier.
-// Guard: if suffix is "mil"/"k" and base number already >= 10000, assume
-// the poster wrote the full number and the suffix is redundant.
 func applyMultiplier(n int, unit string) int {
 	u := strings.ToLower(strings.TrimSpace(unit))
 	if u == "" {
@@ -199,9 +343,7 @@ func applyMultiplier(n int, unit string) int {
 	return n
 }
 
-// isPriceInRange returns 1 (ok), 0 (out of range), or -1 (not applicable).
 func isPriceInRange(category string, price int) int {
-	// Not applicable for non-listing categories.
 	if category == "noise" || category == "seeker" {
 		return -1
 	}
@@ -223,8 +365,6 @@ func isPriceInRange(category string, price int) int {
 	return -1
 }
 
-// adjustPrice tries ×1000 and ÷1000 to bring an out-of-range rental price
-// into range. Returns (adjusted, ok).
 func adjustPrice(price int, category string) (int, bool) {
 	if category != "rental" || price <= 0 {
 		return price, false
@@ -391,7 +531,13 @@ func ParseListing(msgID, chatName, chatJID, timestamp, sender, senderJID, text, 
 		RawText:   text,
 	}
 
-	clean := strings.TrimSpace(text)
+	// Strip URLs before anything else — they contain substrings like
+	// "studio" that trip typology detection.
+	clean := reURL.ReplaceAllString(text, " ")
+	clean = strings.TrimSpace(clean)
+	if clean == "" {
+		clean = text
+	}
 
 	if isNoise(clean, displayText) {
 		l.Category = "noise"
@@ -411,8 +557,20 @@ func ParseListing(msgID, chatName, chatJID, timestamp, sender, senderJID, text, 
 		l.Title = l.Title[:120] + "…"
 	}
 
+	// --- Typology extraction with context awareness ---
+	head := firstNWords(clean, TypologyHeadWords)
+	typology := ""
+	// Strong typology: always counts.
 	if m := reTypology.FindString(clean); m != "" {
-		l.Typology = strings.ToUpper(strings.ReplaceAll(m, " ", ""))
+		typology = m
+	} else if m := reTypologyGeneric.FindString(clean); m != "" {
+		// Generic typology only counts if it appears in the head zone.
+		if reTypologyGeneric.MatchString(head) {
+			typology = m
+		}
+	}
+	if typology != "" {
+		l.Typology = strings.ToUpper(strings.ReplaceAll(typology, " ", ""))
 	}
 
 	if m := rePriceK.FindStringSubmatch(clean); len(m) > 2 {
@@ -438,6 +596,14 @@ func ParseListing(msgID, chatName, chatJID, timestamp, sender, senderJID, text, 
 
 	l.Category = classify(clean)
 
+	// If the classifier decided this is noise (e.g. car ad), drop the
+	// typology — it was a false extraction.
+	if l.Category == "noise" {
+		l.Typology = ""
+		l.Price = 0
+		l.PriceText = ""
+	}
+
 	if l.Category == "rental" {
 		if adj, ok := adjustPrice(l.Price, "rental"); ok {
 			l.Price = adj
@@ -451,35 +617,43 @@ func ParseListing(msgID, chatName, chatJID, timestamp, sender, senderJID, text, 
 
 func classify(text string) string {
 	lower := strings.ToLower(text)
-	head := lower
-	if len(head) > 120 {
-		head = head[:120]
-	}
+	head := firstNWords(lower, HeadWords)
 
-	hasTypology := reTypology.MatchString(text)
-	hasSeeker := reSeekerVerb.MatchString(head)
-	hasRental := reRentalStrong.MatchString(lower) ||
-		(reRentalWeak.MatchString(lower) && hasTypology)
-	hasSale := reSaleStrong.MatchString(lower) ||
-		(reSaleWeak.MatchString(lower) && hasTypology)
-	hasCar := reCar.MatchString(lower)
-
-	if hasSeeker {
+	if reSeekerVerb.MatchString(head) {
 		return "seeker"
 	}
-	if hasCar && !hasTypology {
-		return "noise"
+
+	homeClass := classByName("home")
+	_, headHasHome := containsAnyKeyword(head, homeClass)
+
+	for _, cls := range keywordClasses {
+		if !cls.IsOverride || cls.Verdict == "" {
+			continue
+		}
+		if _, hit := containsAnyKeyword(head, cls); hit {
+			if cls.WeakHome && headHasHome {
+				continue
+			}
+			return cls.Verdict
+		}
 	}
-	if hasSale {
+
+	if reSaleStrong.MatchString(lower) {
 		return "sale"
 	}
-	if hasRental {
+
+	if reRentalStrong.MatchString(lower) {
+		return "rental"
+	}
+	if reRentalWeak.MatchString(lower) && reTypology.MatchString(text) {
 		return "rental"
 	}
 
-	hasPrice := rePriceK.MatchString(text) || rePriceNum.MatchString(text)
-	if hasTypology && hasPrice {
-		return "rental"
+	if headHasHome {
+		hasPrice := rePriceK.MatchString(text) || rePriceNum.MatchString(text)
+		if hasPrice {
+			return "rental"
+		}
 	}
 
 	return "noise"
