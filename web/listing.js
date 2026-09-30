@@ -1,6 +1,4 @@
-// Detail page for a single listing. Reads the msg_id from the URL path
-// (/listing/<id>), fetches /api/listing/<id>, and renders it.
-// Prev/Next navigate through the list stored in sessionStorage by app.js.
+// Detail page for a single listing.
 
 (function () {
   'use strict';
@@ -78,10 +76,11 @@
     });
   }
 
-  function fmtPrice(n, text) {
-    if (text) return text;
-    if (!n) return '';
-    return n.toLocaleString('pt-PT') + ' Kz';
+  // Top price line: only shown when price_ok = 1.
+  // Format: "350 000 Kz". No mil/milhões, no preço, no valor.
+  function fmtPriceTop(n, ok) {
+    if (ok !== 1 || !n || n <= 0) return '';
+    return n.toLocaleString('pt-PT').replace(/\u00a0/g, ' ') + ' Kz';
   }
 
   function metaItem(label, valueHtml) {
@@ -91,10 +90,17 @@
   }
 
   function render(data) {
-    var priceStr = fmtPrice(data.price, data.price_text);
-    var priceHtml = priceStr
-      ? '<div class="price-banner">' + esc(priceStr) + '</div>'
-      : '<div class="price-banner no-price">Sem preço indicado</div>';
+    var topPrice = fmtPriceTop(data.price, data.price_ok);
+    var priceHtml;
+    if (topPrice) {
+      priceHtml = '<div class="price-banner">' + esc(topPrice) + '</div>';
+    } else {
+      priceHtml = '<div class="price-banner no-price">Preço não reconhecido</div>';
+    }
+    // Raw price string below, always shown when present, muted.
+    if (data.price_text && data.price_text.trim() !== '') {
+      priceHtml += '<div class="price-raw">' + esc(data.price_text.trim()) + '</div>';
+    }
 
     var mediaHtml = '';
     if (data.media && data.media.length > 0) {

@@ -5,7 +5,6 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Anúncio — Listings</title>
 <script>
-// Apply theme before CSS paints to avoid a flash of light theme.
 (function () {
   try {
     var t = localStorage.getItem('theme');
@@ -96,11 +95,18 @@
   .price-banner {
     background: var(--price-bg); color: var(--price-text);
     padding: 12px 16px; border-radius: 8px;
-    font-size: 24px; font-weight: 600; margin: 12px 0; display: inline-block;
+    font-size: 24px; font-weight: 600; margin: 12px 0 0; display: inline-block;
   }
   .price-banner.no-price {
     background: var(--bg-subtle); color: var(--muted);
     font-size: 16px; font-weight: 400;
+  }
+  .price-raw {
+    font-size: 12px;
+    color: var(--muted);
+    margin-top: 6px;
+    font-style: italic;
+    word-break: break-word;
   }
   .meta {
     display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
@@ -166,7 +172,6 @@
   .lightbox-close:hover { background: rgba(255,255,255,0.25); }
   h2 { font-size: 16px; margin: 0 0 10px; color: var(--text); }
 
-  /* Send dialog */
   .send-dialog {
     position: fixed; inset: 0; background: rgba(0,0,0,0.5);
     display: none; align-items: center; justify-content: center;

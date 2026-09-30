@@ -17,10 +17,8 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-// wacliDB is a read-only handle on wacli-pro's store.
 var wacliDB *sql.DB
 
-// MediaRef describes one media file attached to a listing.
 type MediaRef struct {
 	MsgID string `json:"msg_id"`
 	URL   string `json:"url"`
@@ -28,12 +26,11 @@ type MediaRef struct {
 	Mime  string `json:"mime"`
 }
 
-// downloadState tracks in-flight and recently failed downloads so we don't
-// hammer WhatsApp when a listing with dead media is opened repeatedly.
 type downloadState struct {
 	mu       sync.Mutex
-	inflight map[string]bool      // msg_id -> currently downloading
-	failed   map[string]time.Time // msg_id -> last failure time
+	inflight map[string]bool
+	failed   map[string]time.Time
+	lockWarn time.Time
 }
 
 var dlState = &downloadState{
@@ -41,9 +38,12 @@ var dlState = &downloadState{
 	failed:   map[string]time.Time{},
 }
 
-const failedRetryAfter = 10 * time.Minute
+const (
+	failedRetryAfter = 10 * time.Minute
+	lockRetryAfter   = 2 * time.Minute
+	lockWarnCooldown = 1 * time.Minute
+)
 
-// defaultWacliDB resolves the wacli-pro store path.
 func defaultWacliDB() string {
 	if p := os.Getenv("WACLI_DB"); p != "" {
 		return p
@@ -55,7 +55,6 @@ func defaultWacliDB() string {
 	return filepath.Join(home, ".wacli-pro", "wacli.db")
 }
 
-// initWacliDB opens the wacli-pro store read-only.
 func initWacliDB() {
 	path := defaultWacliDB()
 	if path == "" {
@@ -82,13 +81,6 @@ func initWacliDB() {
 	log.Printf("wacli DB: opened %s (read-only)", path)
 }
 
-// imagesForListing finds media that belongs to a listing. The pattern in
-// these groups is: text post → images follow within seconds, from the same
-// sender in the same chat. We scan forward up to 10 minutes, stopping early
-// if we hit a message with substantial text.
-//
-// Includes items whose local_path is NULL — the download happens lazily in
-// handleImage when the browser actually requests the file.
 func imagesForListing(msgID, chatJID, senderJID, ts string) []MediaRef {
 	if wacliDB == nil {
 		return nil
@@ -146,7 +138,6 @@ func imagesForListing(msgID, chatJID, senderJID, ts string) []MediaRef {
 	return refs
 }
 
-// handleListing returns a single listing row plus its associated media.
 func handleListing(w http.ResponseWriter, r *http.Request) {
 	id := strings.TrimPrefix(r.URL.Path, "/api/listing/")
 	if id == "" {
@@ -160,14 +151,15 @@ func handleListing(w http.ResponseWriter, r *http.Request) {
 		priceText, location, locationRaw, phone string
 		rawText, category                       string
 		price                                   int
+		priceOk                                 sql.NullInt64
 	)
 	err := db.QueryRow(`
 		SELECT msg_id, chat_name, chat_jid, timestamp, sender, sender_jid,
-		       title, typology, price, price_text, location, location_raw,
+		       title, typology, price, price_text, price_ok, location, location_raw,
 		       phone, raw_text, category
 		FROM listings WHERE msg_id = ?`, id).
 		Scan(&msgID, &chatName, &chatJID, &timestamp, &sender, &senderJID,
-			&title, &typology, &price, &priceText, &location, &locationRaw,
+			&title, &typology, &price, &priceText, &priceOk, &location, &locationRaw,
 			&phone, &rawText, &category)
 	if err == sql.ErrNoRows {
 		http.Error(w, "not found", 404)
@@ -176,6 +168,11 @@ func handleListing(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		http.Error(w, err.Error(), 500)
 		return
+	}
+
+	pok := -1
+	if priceOk.Valid {
+		pok = int(priceOk.Int64)
 	}
 
 	media := imagesForListing(msgID, chatJID, senderJID, timestamp)
@@ -194,6 +191,7 @@ func handleListing(w http.ResponseWriter, r *http.Request) {
 		"typology":     typology,
 		"price":        price,
 		"price_text":   priceText,
+		"price_ok":     pok,
 		"location":     location,
 		"location_raw": locationRaw,
 		"phone":        phone,
@@ -206,9 +204,6 @@ func handleListing(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(out)
 }
 
-// handleImage streams a media file from wacli-pro's local store. If the file
-// hasn't been downloaded yet, it triggers a wacli-pro download inline (up to
-// ~15s), then serves the file.
 func handleImage(w http.ResponseWriter, r *http.Request) {
 	id := strings.TrimPrefix(r.URL.Path, "/api/image/")
 	if id == "" {
@@ -226,7 +221,6 @@ func handleImage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// If we don't have it locally, try to download it on-demand.
 	if localPath == "" {
 		if !shouldAttemptDownload(id) {
 			http.Error(w, "media unavailable (retry skipped)", 404)
@@ -238,15 +232,19 @@ func handleImage(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if err := downloadMedia(chatJID, id); err != nil {
-			markDownloadFailed(id)
-			log.Printf("on-demand download failed id=%s chat=%s: %v", id, chatJID, err)
+			if isStoreLocked(err) {
+				logStoreLockWarn()
+				markDownloadFailed(id, lockRetryAfter)
+			} else {
+				log.Printf("on-demand download failed id=%s chat=%s: %v", id, chatJID, err)
+				markDownloadFailed(id, failedRetryAfter)
+			}
 			http.Error(w, "media unavailable", 404)
 			return
 		}
-		// Re-lookup after download.
 		localPath, mimeType, err = lookupMedia(id)
 		if err != nil || localPath == "" {
-			markDownloadFailed(id)
+			markDownloadFailed(id, failedRetryAfter)
 			http.Error(w, "media unavailable after download", 404)
 			return
 		}
@@ -271,8 +269,6 @@ func handleImage(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "public, max-age=86400")
 	http.ServeContent(w, r, filepath.Base(localPath), time.Time{}, f)
 }
-
-// ---------- Helpers ----------
 
 func lookupMedia(msgID string) (localPath, mimeType string, err error) {
 	var lp, mt sql.NullString
@@ -323,16 +319,37 @@ func clearDownloadState(msgID string) {
 	delete(dlState.failed, msgID)
 }
 
-func markDownloadFailed(msgID string) {
+func markDownloadFailed(msgID string, after time.Duration) {
 	dlState.mu.Lock()
 	defer dlState.mu.Unlock()
 	delete(dlState.inflight, msgID)
 	dlState.failed[msgID] = time.Now()
 }
 
-// downloadMedia runs `wacli-pro media download` synchronously with a timeout.
+func isStoreLocked(err error) bool {
+	if err == nil {
+		return false
+	}
+	s := strings.ToLower(err.Error())
+	return strings.Contains(s, "store is locked") ||
+		strings.Contains(s, "outro processo bloqueou")
+}
+
+func logStoreLockWarn() {
+	dlState.mu.Lock()
+	last := dlState.lockWarn
+	dlState.lockWarn = time.Now()
+	dlState.mu.Unlock()
+
+	if time.Since(last) < lockWarnCooldown {
+		return
+	}
+	log.Printf("media download: store locked by another wacli process. " +
+		"Stop the daemon (`wacli-pro daemon stop`) while the app is fetching media.")
+}
+
 func downloadMedia(chatJID, msgID string) error {
-	ctx, cancel := contextWithTimeout(15 * time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 
 	cmd := exec.CommandContext(ctx, "wacli-pro",
@@ -362,9 +379,4 @@ func guessMime(path string) string {
 		return "video/webm"
 	}
 	return "application/octet-stream"
-}
-
-// contextWithTimeout is a small wrapper so the imports stay tidy.
-func contextWithTimeout(d time.Duration) (context.Context, context.CancelFunc) {
-	return context.WithTimeout(context.Background(), d)
 }
