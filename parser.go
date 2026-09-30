@@ -19,6 +19,7 @@ type Listing struct {
 	Typology    string
 	Price       int
 	PriceText   string
+	PriceOk     int
 	Location    string
 	LocationRaw string
 	Phone       string
@@ -26,50 +27,108 @@ type Listing struct {
 	Category    string
 }
 
+// Rental price range (Kz / month). Outside → flagged, not hidden.
+const (
+	RentalMin = 15000
+	RentalMax = 700000
+	SaleMin   = 1000000
+	SaleMax   = 50000000
+)
+
 var (
-	reRentalVerb = regexp.MustCompile(`(?i)(` +
+	reRentalStrong = regexp.MustCompile(`(?i)(` +
 		`arrenda[\s\-]?se|arrendam[\s\-]?se|` +
-		`aluga[\s\-]?se|` +
-		`\barrendo\b|\balugo\b|\balugando\b|\barrendando\b|` +
+		`aluga[\s\-]?se|alugam[\s\-]?se|` +
+		`\barrendo\b|\barrendam\b|` +
+		`\balugo\b|\balugam\b|` +
+		`\baluguei\b|\barrendei\b|` +
+		`\balugando\b|\barrendando\b|` +
 		`\bestou a alugar\b|\bestou alugando\b|` +
 		`\bestou a arrendar\b|\bestou arrendando\b|` +
-		`\barrendar\s*:|\bpara aluguer\b|\bpara arrendar\b|` +
-		`\bem arrendamento\b|\barrendamento\b|\baluguer\b` +
+		`\bestamos a alugar\b|\bestamos alugando\b|` +
+		`\btemos para alugar\b|\btemos para arrendar\b|` +
+		`\bpara aluguer\b|\bpara aluguel\b|` +
+		`\bpara arrendar\b|\bpara arrendamento\b|` +
+		`\bem arrendamento\b|\bem aluguer\b|` +
+		`\barrendamento\b|\baluguer\b|\baluguel\b` +
 		`)`)
 
-	// Seeker verbs: note the accent-tolerant "à/a" and the alternation on
-	// "estou (à|a|em) procura" — the previous version only matched the
-	// unaccented "a procura", which the seeder produces as "à procura".
+	reRentalWeak = regexp.MustCompile(`(?i)(` +
+		`\barrenda\b|\barrendas\b|\barrendar\b|` +
+		`\baluga\b|\balugas\b|\balugar\b` +
+		`)`)
+
 	reSeekerVerb = regexp.MustCompile(`(?i)(` +
-		`\bprocuro\b|\bprocuramos\b|\bprocura[\s\-]?se\b|` +
-		`\bpreciso (de|duma|dum)\b|` +
-		`\bestou (à|a|em)? ?procura\b|\bando à procura\b|` +
-		`\bquero uma\b|\bquero um\b|` +
-		`\balgu[eé]m tem\b|\bquem tem\b|\balgu[eé]m sabe\b` +
+		`\bprocuro\b|\bprocuramos\b|\bprocurando\b|\bprocura[\s\-]?se\b|` +
+		`\bestou (à|a|em)? ?procura\b|\bando (à|a)? ?procura\b|` +
+		`\bestou a procurar\b|\bestou procurando\b|` +
+		`\bpreciso (de|duma|dum|duns|dumas)\b|\bprecisamos (de|duma|dum)\b|` +
+		`\bquero (uma|um|uns|umas)\b|\bqueremos (uma|um)\b|` +
+		`\balgu[eé]m tem\b|\balgu[eé]m sabe\b|\balgu[eé]m arranja\b|\balgu[eé]m conhece\b|` +
+		`\bquem tem\b|\bquem sabe\b|\bquem arranja\b|\bquem conhece\b|` +
+		`\barranja[\s\-]?se\b|\barranjem\b|` +
+		`\bnecessito (de|duma|dum)\b|\bnecessitamos (de|duma|dum)\b|` +
+		`\btou à procura\b|\btou a procura\b|` +
+		`\bsolicito\b|\bsolicitaç` +
 		`)`)
 
-	// Sale verbs. IMPORTANT: no \b before accented chars (à, está) — Go's
-	// regexp \b is ASCII-only and fails to match when the next rune is
-	// non-ASCII. That bug put "VIVENDA V3 À VENDA" into rentals.
-	reSaleVerb = regexp.MustCompile(`(?i)(` +
-		`\bvende[\s\-]?se\b|\bvendo\b|\bvendemos\b|` +
-		`à venda|para venda|\bvenda de\b|está à venda` +
+	reSaleStrong = regexp.MustCompile(`(?i)(` +
+		`\bvende[\s\-]?se\b|\bvendem[\s\-]?se\b|` +
+		`\bvendo\b|\bvendemos\b|` +
+		`à venda|para venda|` +
+		`está à venda|está para vender|` +
+		`\bvenda de\b|\bem venda\b|` +
+		`\bquero vender\b|\bpretendo vender\b|` +
+		`\bvenda urgente\b|` +
+		`\bem construção\b` +
+		`)`)
+
+	reSaleWeak = regexp.MustCompile(`(?i)(` +
+		`\bvender\b|\bvende\b|\bvendes\b` +
+		`)`)
+
+	reCar = regexp.MustCompile(`(?i)(` +
+		`mercedes|land\s?cruiser|nissan|suzuki|toyota|hilux|titan|` +
+		`grand\s?vitara|prado|rav4|range\s?rover|bmw|audi|` +
+		`\bv8\b|\bv6\b|\bg63\b|\bgxr?\b|\bgx\b|` +
+		`motor\s+(selado|avariado|seco)|caixa\s+autom|` +
+		`combust[íi]vel|gasolina|diesel|matr[íi]cula|` +
+		`quil[oó]metros?|kms?\s*\d|` +
+		`carro[s]?\b|ve[íi]culo|viatura` +
 		`)`)
 
 	reTypology = regexp.MustCompile(`(?i)\b(` +
 		`T[\s\-]?[0-9]|V[\s\-]?[0-9]|` +
-		`duplex|apartamento|vivenda|moradia|quarto|residencial` +
+		`duplex|triplex|` +
+		`apartamento|apart|apº|ap\.|apto|` +
+		`vivenda|moradia|villa|` +
+		`quarto|kitnet|kit[\s\-]?net|flat|studio|estúdio|` +
+		`loja|armazém|armazem|escritório|escritorio|` +
+		`terreno|lote|quinta|` +
+		`residencial|casa` +
 		`)\b`)
 
-	rePriceK = regexp.MustCompile(`(?i)(\d{1,3}(?:[.,\s]\d{3})+|\d+)\s*(mil|kz|kzs|akz|aoa|kwanzas?)`)
+	// Currency-suffixed price. Handles "50 mil", "450 kz",
+	// "45.000.000,00 Kz", "100 'MIL", "250k", "300M", "1 milhão".
+	rePriceK = regexp.MustCompile(`(?i)` +
+		`(\d{1,3}(?:[.,\s]\d{3})+|\d+)` +
+		`(?:[.,]\d{1,2})?` +
+		`\s*['\x60]?\s*` +
+		`(milh(?:ão|ões|ao|oes)|mil|kzs?|k\b|akz|aoa|usd|\$|m\b)`)
 
-	rePriceNum = regexp.MustCompile(`(?i)(?:plafond|pre[çc]o|valor|renda|plafon|mensalidade|por m[êe]s|mensal)\s*[:\-]?\s*(\d{1,3}(?:[.,\s]\d{3})*|\d+)\s*(mil)?`)
+	// Leading-marker price. Handles "preço: 45", "renda 230 mil",
+	// "mensalidade 45", "plafon 250k", "plafond 300M".
+	rePriceNum = regexp.MustCompile(`(?i)` +
+		`(?:plafond|plafon|pre[çc]o|valor|renda|mensalidade|por m[êe]s|mensal)\s*[:\-]?\s*` +
+		`(\d{1,3}(?:[.,\s]\d{3})*|\d+)` +
+		`(?:[.,]\d{1,2})?` +
+		`\s*(milh(?:ão|ões|ao|oes)|mil|kzs?|k\b|akz|aoa|usd|\$|m\b)?`)
 
 	rePhone = regexp.MustCompile(`\b(?:9\d{2}[\s\-]?\d{3}[\s\-]?\d{3}|9\d{8})\b`)
 
-	reSpam = regexp.MustCompile(`(?i)(kwanzabet|shopee\.com\.br|chat vip|affiliates/?btag|wa\.me/message|bet\s?\d|cassino|aposta)`)
+	reSpam = regexp.MustCompile(`(?i)(kwanzabet|shopee\.com\.br|chat vip|affiliates/?btag|wa\.me/message|bet\s?\d|cassino|aposta|desbaratiza|detona)`)
 
-	reMedia = regexp.MustCompile(`^(sent (image|video|audio|sticker|document)|\(message\))$`)
+	reMedia = regexp.MustCompile(`^(sent (image|video|audio|sticker|document)|\(message\)|image|video|audio)$`)
 
 	reWord = regexp.MustCompile(`[A-Za-zÀ-ÿ0-9]+`)
 )
@@ -91,12 +150,9 @@ var locationMarkers = []string{
 }
 
 var knownLocations = []string{
-	// Municipalities & major districts
 	"Talatona", "Belas", "Cacuaco", "Cazenga", "Viana", "Kilamba Kiaxi",
 	"Kilamba", "Icolo e Bengo", "Quissama", "Mussulo", "Ingombota",
 	"Maianga", "Rangel", "Samba", "Sambizanga", "Hoji ya Henda",
-
-	// Core neighborhoods
 	"Camama", "Morro Bento", "Nova Vida", "Golf 2", "Golfo 2", "Golfe 2",
 	"Golf 1", "Golfe 1", "Zango", "Luanda Sul", "Patriota", "Lar do Patriota",
 	"Benfica", "Rocha Pinto", "Rocha", "Fubu", "Gamek", "Soba Kapassa",
@@ -110,13 +166,9 @@ var knownLocations = []string{
 	"Vila Estoril", "Morro da Luz", "Kikolo", "Cabolombo", "Ramiros",
 	"São Paulo", "Mabor", "Panguila", "Sequele", "Kima Kieza",
 	"Vila Verde", "Quenguela", "Morro dos Veados",
-
-	// Zones with numbers
 	"Zango 0", "Zango 1", "Zango 2", "Zango 3", "Zango 4", "Zango 5",
 	"Camama 1", "Camama 2", "Camama 3", "Camama 4",
 	"Calemba 2",
-
-	// Landmarks / reference places
 	"Angomart", "Kero", "Xyami", "Belas Shopping", "Fortaleza",
 	"Cidadela", "Aeroporto", "Porto de Luanda", "Marginal", "Miramar",
 	"Alvalade", "Maculusso", "Mutamba", "Coqueiros", "Chicala",
@@ -124,6 +176,74 @@ var knownLocations = []string{
 }
 
 var numberedBases = []string{"golf", "golfe", "golfo", "zango", "camama", "calemba"}
+
+// applyMultiplier applies the currency-suffix multiplier.
+// Guard: if suffix is "mil"/"k" and base number already >= 10000, assume
+// the poster wrote the full number and the suffix is redundant.
+func applyMultiplier(n int, unit string) int {
+	u := strings.ToLower(strings.TrimSpace(unit))
+	if u == "" {
+		return n
+	}
+	switch u {
+	case "mil", "k", "kz", "kzs":
+		if n >= 10000 {
+			return n
+		}
+		return n * 1000
+	case "milhão", "milhões", "milhao", "milhoes", "m":
+		return n * 1000000
+	case "akz", "aoa", "usd", "$":
+		return n
+	}
+	return n
+}
+
+// isPriceInRange returns 1 (ok), 0 (out of range), or -1 (not applicable).
+func isPriceInRange(category string, price int) int {
+	// Not applicable for non-listing categories.
+	if category == "noise" || category == "seeker" {
+		return -1
+	}
+	if price == 0 {
+		return 0
+	}
+	switch category {
+	case "rental":
+		if price >= RentalMin && price <= RentalMax {
+			return 1
+		}
+		return 0
+	case "sale":
+		if price >= SaleMin && price <= SaleMax {
+			return 1
+		}
+		return 0
+	}
+	return -1
+}
+
+// adjustPrice tries ×1000 and ÷1000 to bring an out-of-range rental price
+// into range. Returns (adjusted, ok).
+func adjustPrice(price int, category string) (int, bool) {
+	if category != "rental" || price <= 0 {
+		return price, false
+	}
+	if price >= RentalMin && price <= RentalMax {
+		return price, true
+	}
+	mul := price * 1000
+	if mul >= RentalMin && mul <= RentalMax {
+		return mul, true
+	}
+	if price >= 1000 && price%1000 == 0 {
+		div := price / 1000
+		if div >= RentalMin && div <= RentalMax {
+			return div, true
+		}
+	}
+	return price, false
+}
 
 func matchLocation(text string) string {
 	lower := strings.ToLower(text)
@@ -275,6 +395,7 @@ func ParseListing(msgID, chatName, chatJID, timestamp, sender, senderJID, text, 
 
 	if isNoise(clean, displayText) {
 		l.Category = "noise"
+		l.PriceOk = -1
 		return l
 	}
 
@@ -296,16 +417,14 @@ func ParseListing(msgID, chatName, chatJID, timestamp, sender, senderJID, text, 
 
 	if m := rePriceK.FindStringSubmatch(clean); len(m) > 2 {
 		l.Price = parseNumber(m[1])
-		if strings.EqualFold(m[2], "mil") {
-			l.Price *= 1000
-		}
-		l.PriceText = m[0]
+		l.Price = applyMultiplier(l.Price, m[2])
+		l.PriceText = strings.TrimSpace(m[0])
 	} else if m := rePriceNum.FindStringSubmatch(clean); len(m) > 2 {
 		l.Price = parseNumber(m[1])
-		if m[2] != "" {
-			l.Price *= 1000
+		if len(m) > 2 {
+			l.Price = applyMultiplier(l.Price, m[2])
 		}
-		l.PriceText = m[0]
+		l.PriceText = strings.TrimSpace(m[0])
 	}
 
 	l.Location = matchLocation(clean)
@@ -319,12 +438,17 @@ func ParseListing(msgID, chatName, chatJID, timestamp, sender, senderJID, text, 
 
 	l.Category = classify(clean)
 
+	if l.Category == "rental" {
+		if adj, ok := adjustPrice(l.Price, "rental"); ok {
+			l.Price = adj
+		}
+	}
+
+	l.PriceOk = isPriceInRange(l.Category, l.Price)
+
 	return l
 }
 
-// classify decides a listing's category. Rules are tried in strict priority
-// order — the first match wins. Verbs in the title carry the strongest signal;
-// structural fallbacks (typology + price) only apply when no verb matches.
 func classify(text string) string {
 	lower := strings.ToLower(text)
 	head := lower
@@ -332,34 +456,27 @@ func classify(text string) string {
 		head = head[:120]
 	}
 
+	hasTypology := reTypology.MatchString(text)
 	hasSeeker := reSeekerVerb.MatchString(head)
-	hasRental := reRentalVerb.MatchString(lower)
-	hasSale := reSaleVerb.MatchString(lower)
+	hasRental := reRentalStrong.MatchString(lower) ||
+		(reRentalWeak.MatchString(lower) && hasTypology)
+	hasSale := reSaleStrong.MatchString(lower) ||
+		(reSaleWeak.MatchString(lower) && hasTypology)
+	hasCar := reCar.MatchString(lower)
 
-	// Priority 1: explicit seeker verb. This wins over everything else,
-	// including a rental or sale verb later in the same post, because the
-	// seeker verb sets the author's intent ("I'm looking for X"). This also
-	// handles the case where a seeker post quotes what they want
-	// ("procuro arrendamento...") without being misread as a rental ad.
 	if hasSeeker {
 		return "seeker"
 	}
-
-	// Priority 2: explicit sale verb. Sales are rarer than rentals, so if
-	// both appear, prefer sale (the seller usually leads with "vende-se").
+	if hasCar && !hasTypology {
+		return "noise"
+	}
 	if hasSale {
 		return "sale"
 	}
-
-	// Priority 3: explicit rental verb.
 	if hasRental {
 		return "rental"
 	}
 
-	// Priority 4: structural fallback. Typology + price is a strong signal
-	// for a rental ad with no verb, but only if we didn't hit any of the
-	// above. This is last because it's the least reliable.
-	hasTypology := reTypology.MatchString(text)
 	hasPrice := rePriceK.MatchString(text) || rePriceNum.MatchString(text)
 	if hasTypology && hasPrice {
 		return "rental"

@@ -99,6 +99,7 @@ func initDB() error {
 			typology TEXT,
 			price INTEGER,
 			price_text TEXT,
+			price_ok INTEGER,
 			location TEXT,
 			location_raw TEXT,
 			phone TEXT,
@@ -119,7 +120,31 @@ func initDB() error {
 		);
 		INSERT OR IGNORE INTO sync_state (id, last_msg_ts) VALUES (1, 0);
 	`)
-	return err
+	if err != nil {
+		return err
+	}
+
+	// Migrate old DBs: add price_ok if missing.
+	var hasPriceOk bool
+	rows, err := db.Query(`PRAGMA table_info(listings)`)
+	if err == nil {
+		for rows.Next() {
+			var cid, notnull, pk int
+			var name, ctype string
+			var dflt interface{}
+			rows.Scan(&cid, &name, &ctype, &notnull, &dflt, &pk)
+			if name == "price_ok" {
+				hasPriceOk = true
+			}
+		}
+		rows.Close()
+	}
+	if !hasPriceOk {
+		db.Exec(`ALTER TABLE listings ADD COLUMN price_ok INTEGER`)
+		db.Exec(`CREATE INDEX IF NOT EXISTS idx_price_ok ON listings(price_ok)`)
+	}
+
+	return nil
 }
 
 func handleIndex(w http.ResponseWriter, r *http.Request) {

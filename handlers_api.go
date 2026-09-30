@@ -15,9 +15,7 @@ import (
 const defaultPerPage = 50
 const maxPerPage = 500
 
-// Base filter applied to every listings query: only group chats with
-// non-empty raw_text. Empty messages (media-only stubs, blank replies)
-// have nothing to show, so they're hidden from the UI.
+// Base filter applied to every listings query.
 const baseListingsFilter = "category = ? AND chat_jid LIKE '%@g.us' AND raw_text IS NOT NULL AND TRIM(raw_text) != ''"
 
 func handleListings(w http.ResponseWriter, r *http.Request) {
@@ -30,6 +28,7 @@ func handleListings(w http.ResponseWriter, r *http.Request) {
 	category := q.Get("category")
 	sortCol := q.Get("sort_col")
 	sortDir := q.Get("sort_dir")
+	onlyPriceOk := q.Get("only_price_ok") == "1"
 
 	page := 1
 	if s := q.Get("page"); s != "" {
@@ -88,6 +87,9 @@ func handleListings(w http.ResponseWriter, r *http.Request) {
 			args = append(args, n)
 		}
 	}
+	if onlyPriceOk {
+		where += " AND price_ok = 1"
+	}
 	if search != "" {
 		where += " AND (raw_text LIKE ? OR title LIKE ?)"
 		s := "%" + search + "%"
@@ -109,13 +111,21 @@ func handleListings(w http.ResponseWriter, r *http.Request) {
 	}
 	offset := (page - 1) * perPage
 
-	query := "SELECT msg_id, chat_name, chat_jid, timestamp, sender, sender_jid, title, typology, price, price_text, location, location_raw, phone, raw_text, category FROM listings " + where
-	if sortDir == "asc" {
-		query += " ORDER BY CASE WHEN " + sortCol + " IS NULL OR " + sortCol + " = '' THEN 1 ELSE 0 END, " + sortCol + " ASC, timestamp DESC"
+	// Ordering: if sorting by price, push non-plausible prices to the bottom.
+	// Otherwise normal ordering.
+	orderClause := ""
+	if sortCol == "price" {
+		// Outliers (price_ok != 1) always last; then sort by price in the
+		// requested direction; then by timestamp as a tiebreak.
+		orderClause = " ORDER BY CASE WHEN price_ok = 1 THEN 0 ELSE 1 END, " +
+			"CASE WHEN " + sortCol + " IS NULL OR " + sortCol + " = '' THEN 1 ELSE 0 END, " +
+			sortCol + " " + strings.ToUpper(sortDir) + ", timestamp DESC"
 	} else {
-		query += " ORDER BY CASE WHEN " + sortCol + " IS NULL OR " + sortCol + " = '' THEN 1 ELSE 0 END, " + sortCol + " DESC, timestamp DESC"
+		orderClause = " ORDER BY CASE WHEN " + sortCol + " IS NULL OR " + sortCol + " = '' THEN 1 ELSE 0 END, " +
+			sortCol + " " + strings.ToUpper(sortDir) + ", timestamp DESC"
 	}
-	query += " LIMIT ? OFFSET ?"
+
+	query := "SELECT msg_id, chat_name, chat_jid, timestamp, sender, sender_jid, title, typology, price, price_text, price_ok, location, location_raw, phone, raw_text, category FROM listings " + where + orderClause + " LIMIT ? OFFSET ?"
 	pageArgs := append(append([]interface{}{}, args...), perPage, offset)
 
 	rows, err := db.Query(query, pageArgs...)
@@ -136,6 +146,7 @@ func handleListings(w http.ResponseWriter, r *http.Request) {
 		Typology    string `json:"typology"`
 		Price       int    `json:"price"`
 		PriceText   string `json:"price_text"`
+		PriceOk     int    `json:"price_ok"`
 		Location    string `json:"location"`
 		LocationRaw string `json:"location_raw"`
 		Phone       string `json:"phone"`
@@ -146,7 +157,13 @@ func handleListings(w http.ResponseWriter, r *http.Request) {
 	var out []Row
 	for rows.Next() {
 		var r Row
-		rows.Scan(&r.MsgID, &r.ChatName, &r.ChatJID, &r.Timestamp, &r.Sender, &r.SenderJID, &r.Title, &r.Typology, &r.Price, &r.PriceText, &r.Location, &r.LocationRaw, &r.Phone, &r.RawText, &r.Category)
+		var pok sql.NullInt64
+		rows.Scan(&r.MsgID, &r.ChatName, &r.ChatJID, &r.Timestamp, &r.Sender, &r.SenderJID, &r.Title, &r.Typology, &r.Price, &r.PriceText, &pok, &r.Location, &r.LocationRaw, &r.Phone, &r.RawText, &r.Category)
+		if pok.Valid {
+			r.PriceOk = int(pok.Int64)
+		} else {
+			r.PriceOk = -1
+		}
 		out = append(out, r)
 	}
 	if out == nil {
@@ -187,6 +204,7 @@ func handleNearby(w http.ResponseWriter, r *http.Request) {
 		category = "rental"
 	}
 	typology := q.Get("typology")
+	onlyPriceOk := q.Get("only_price_ok") == "1"
 
 	page := 1
 	if s := q.Get("page"); s != "" {
@@ -202,12 +220,15 @@ func handleNearby(w http.ResponseWriter, r *http.Request) {
 	}
 
 	query := `SELECT msg_id, chat_name, timestamp, sender, title, typology,
-	                 price, price_text, location, location_raw, phone, raw_text, category
+	                 price, price_text, price_ok, location, location_raw, phone, raw_text, category
 	          FROM listings WHERE ` + baseListingsFilter
 	args := []interface{}{category}
 	if typology != "" {
 		query += " AND typology = ?"
 		args = append(args, typology)
+	}
+	if onlyPriceOk {
+		query += " AND price_ok = 1"
 	}
 
 	rows, err := db.Query(query, args...)
@@ -226,6 +247,7 @@ func handleNearby(w http.ResponseWriter, r *http.Request) {
 		Typology    string  `json:"typology"`
 		Price       int     `json:"price"`
 		PriceText   string  `json:"price_text"`
+		PriceOk     int     `json:"price_ok"`
 		Location    string  `json:"location"`
 		LocationRaw string  `json:"location_raw"`
 		Phone       string  `json:"phone"`
@@ -239,9 +261,15 @@ func handleNearby(w http.ResponseWriter, r *http.Request) {
 	var all []Row
 	for rows.Next() {
 		var r Row
+		var pok sql.NullInt64
 		rows.Scan(&r.MsgID, &r.ChatName, &r.Timestamp, &r.Sender, &r.Title,
-			&r.Typology, &r.Price, &r.PriceText, &r.Location, &r.LocationRaw,
+			&r.Typology, &r.Price, &r.PriceText, &pok, &r.Location, &r.LocationRaw,
 			&r.Phone, &r.RawText, &r.Category)
+		if pok.Valid {
+			r.PriceOk = int(pok.Int64)
+		} else {
+			r.PriceOk = -1
+		}
 
 		clat, clng, ok := resolveCoords(r.Location, r.LocationRaw)
 		if !ok {
@@ -255,7 +283,13 @@ func handleNearby(w http.ResponseWriter, r *http.Request) {
 		all = append(all, r)
 	}
 
-	sort.Slice(all, func(i, j int) bool {
+	// Sort: outliers last, then by distance ascending.
+	sort.SliceStable(all, func(i, j int) bool {
+		iOk := all[i].PriceOk == 1
+		jOk := all[j].PriceOk == 1
+		if iOk != jOk {
+			return iOk // ok ones first
+		}
 		return all[i].DistanceKm < all[j].DistanceKm
 	})
 

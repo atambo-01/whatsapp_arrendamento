@@ -10,7 +10,6 @@ import (
 	"time"
 )
 
-// getLastParsedTs returns the highest message timestamp we've already parsed.
 func getLastParsedTs() int64 {
 	var ts int64
 	err := db.QueryRow(`SELECT last_msg_ts FROM sync_state WHERE id = 1`).Scan(&ts)
@@ -43,7 +42,6 @@ func parseWacliTs(s string) int64 {
 }
 
 // isGroupChat returns true only for group JIDs (@g.us).
-// Filters out DMs (@s.whatsapp.net), status (@broadcast), and @lid DMs.
 func isGroupChat(jid string) bool {
 	return len(jid) > 5 && jid[len(jid)-5:] == "@g.us"
 }
@@ -82,7 +80,7 @@ func refreshOnce(full bool) (inserted int, seen int, counts map[string]int) {
 		return 0, 0, counts
 	}
 
-	// Only process group chats — skip DMs and status broadcasts.
+	// Only group chats.
 	filtered := msgs[:0]
 	for _, m := range msgs {
 		if isGroupChat(m.ChatJID) {
@@ -100,9 +98,9 @@ func refreshOnce(full bool) (inserted int, seen int, counts map[string]int) {
 	stmt, err := tx.Prepare(`
 		INSERT OR REPLACE INTO listings
 		(msg_id, chat_name, chat_jid, timestamp, sender, sender_jid,
-		 title, typology, price, price_text, location, location_raw,
+		 title, typology, price, price_text, price_ok, location, location_raw,
 		 phone, raw_text, category)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`)
 	if err != nil {
 		log.Printf("prepare: %v", err)
@@ -127,7 +125,7 @@ func refreshOnce(full bool) (inserted int, seen int, counts map[string]int) {
 
 		_, err := stmt.Exec(l.MsgID, l.ChatName, l.ChatJID, l.Timestamp,
 			l.Sender, l.SenderJID, l.Title, l.Typology, l.Price, l.PriceText,
-			l.Location, l.LocationRaw, l.Phone, l.RawText, l.Category)
+			l.PriceOk, l.Location, l.LocationRaw, l.Phone, l.RawText, l.Category)
 		if err == nil {
 			inserted++
 		} else {
