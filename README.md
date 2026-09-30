@@ -1,4 +1,6 @@
-# WhatsApp Arrendamento
+# Jinzo
+
+Find rentals, here.
 
 A tool for extracting, parsing and browsing rental/property listings from
 WhatsApp groups in Luanda, Angola.
@@ -274,6 +276,16 @@ Then `make restart` and re-refresh to re-parse existing messages.
   Add the missing neighborhood to fix.
 
 ---
+
+## Naming
+
+**Jinzo** is the product name. The codebase, binary, database files, env
+vars and storage keys still use the original working name (`listings`,
+`LISTINGS_DB`, `listings.db`). This is deliberate — the rename was scoped
+to user-facing surfaces only, to avoid churn in tooling, services, and
+saved browser state.
+
+When reading the code or running commands, `listings` means Jinzo.
 
 ## License
 

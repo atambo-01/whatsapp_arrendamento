@@ -17,7 +17,7 @@ WACLI_DB        ?= $(HOME)/.wacli-pro/wacli.db
 DAYS  ?= 30
 LIMIT ?= 0
 
-.PHONY: build run run-dev seed seed-backfill backfill status clean
+.PHONY: build run run-dev seed seed-backfill backfill status clean re kill
 
 build:
 	go build -o $(BIN) .
@@ -40,6 +40,23 @@ seed-backfill:
 # Media backfill — see backfill_media.sh
 backfill:
 	./backfill_media.sh $(DAYS) $(LIMIT)
+
+PORT ?= 8090
+
+# Kill whatever is listening on $(PORT). Frees the port for `make run`.
+kill:
+	@echo "→ Freeing port $(PORT)…"
+	@if command -v fuser >/dev/null 2>&1; then \
+		fuser -k $(PORT)/tcp 2>/dev/null && echo "  killed (fuser)" || echo "  nothing on :$(PORT)"; \
+	elif command -v lsof >/dev/null 2>&1; then \
+		pids=$$(lsof -ti tcp:$(PORT)); \
+		if [ -n "$$pids" ]; then kill -9 $$pids && echo "  killed (lsof): $$pids"; else echo "  nothing on :$(PORT)"; fi; \
+	else \
+		echo "  no fuser/lsof — install one, or kill manually"; exit 1; \
+	fi
+
+# Kill and immediately restart. Use after `go build` to pick up changes.
+re: kill build run
 
 # Simple health check of a running app
 status:
