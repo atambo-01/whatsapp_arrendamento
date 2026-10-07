@@ -59,3 +59,10 @@ Cartões em vez de tabela, separadores com contagens, filtros por tipologia/zona
 preço, pesquisa (`/` foca), mapa com ordenação por proximidade e raio, painel de
 detalhe com link directo (`/listing/:id`), resposta ao anúncio no grupo, tema
 claro/escuro e estado dos filtros no URL.
+
+## Administração
+
+Só o administrador pode ligar o WhatsApp (ver o QR), sincronizar, terminar a
+sessão e enviar mensagens. Define a palavra-passe com `ADMIN_PASSWORD`; se não
+estiver definida, é gerada uma aleatória e mostrada no arranque. O QR code nunca
+é enviado a visitantes. Clica em **Admin** no topo para entrar.

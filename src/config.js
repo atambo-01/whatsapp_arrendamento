@@ -12,5 +12,8 @@ export const config = {
   syncLimit: Number(process.env.SYNC_LIMIT) || 300,
   // Set WA_DISABLED=1 to run the UI only (e.g. with seeded data).
   waDisabled: process.env.WA_DISABLED === "1",
+  // Admin password (ADMIN_PASSWORD). If unset, a random one is printed at startup.
+  adminPassword: process.env.ADMIN_PASSWORD || "",
+  adminSecret: process.env.ADMIN_SECRET || "",
   chromePath: process.env.PUPPETEER_EXECUTABLE_PATH || undefined,
 };

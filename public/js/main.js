@@ -71,7 +71,7 @@ function renderList(data) {
   $("list").innerHTML = data.rows.length
     ? data.rows.map(cardHtml).join("")
     : `<div class="empty"><div class="big">🔎</div><h3>Nada encontrado</h3>
-       <p>${hasFilters() ? "Experimente remover alguns filtros." : wa.state.status === "ready" ? "Ainda sem anúncios — use Sincronizar." : "Ligue o WhatsApp para importar os anúncios dos seus grupos."}</p>
+       <p>${hasFilters() ? "Experimente remover alguns filtros." : wa.state.status === "ready" ? "Ainda sem anúncios — o administrador pode sincronizar." : "O administrador ainda não ligou o WhatsApp."}</p>
        ${hasFilters() ? '<button class="btn" id="resetFilters">Limpar filtros</button>' : ""}</div>`;
   renderPager(data);
 }
@@ -143,7 +143,7 @@ function openDrawer(id) {
     <div class="raw">${esc(r.raw_text)}</div>
     <div class="actions">
       ${link ? `<a class="btn btn-primary" target="_blank" rel="noopener" href="${link}">Abrir no WhatsApp</a>` : ""}
-      <button class="btn" id="replyBtn" ${wa.state.status === "ready" ? "" : "disabled title='Ligue o WhatsApp primeiro'"}>Responder no grupo</button>
+      <button class="btn" id="replyBtn" ${wa.admin && wa.state.status === "ready" ? "" : "disabled title='Só o administrador, com o WhatsApp ligado'"}>Responder no grupo</button>
       <button class="btn btn-ghost" id="copyBtn">Copiar texto</button>
     </div>`;
   const d = $("drawer");

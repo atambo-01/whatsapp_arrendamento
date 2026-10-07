@@ -2,7 +2,7 @@
 import { api } from "./api.js";
 import { esc, toast } from "./format.js";
 
-export const wa = { state: { status: "idle" }, listeners: new Set() };
+export const wa = { state: { status: "idle", sync: {} }, admin: false };
 const $ = (id) => document.getElementById(id);
 const LABEL = {
   disabled: "Sem WhatsApp", idle: "Ligar WhatsApp", starting: "A iniciar…", qr: "Ler QR code",
@@ -11,18 +11,59 @@ const LABEL = {
 let lastSyncRunning = false;
 let autoOpened = false;
 
-export function initWhatsApp({ onSynced }) {
-  const es = new EventSource("/api/whatsapp/events");
+let es;
+let onSyncedCb;
+
+function connectStream() {
+  es?.close();
+  es = new EventSource("/api/whatsapp/events");
   es.onmessage = (e) => {
     wa.state = JSON.parse(e.data);
     render();
     if (lastSyncRunning && !wa.state.sync.running) {
       toast(`Sincronização concluída · ${wa.state.sync.saved} mensagens`);
-      onSynced?.();
+      onSyncedCb?.();
     }
     lastSyncRunning = wa.state.sync.running;
   };
-  $("waPill").onclick = () => openDialog();
+}
+
+function setAdmin(admin) {
+  wa.admin = admin;
+  autoOpened = false;
+  $("adminBtnText").textContent = admin ? "Sair" : "Admin";
+  connectStream(); // the stream content (QR) depends on who is asking
+  document.dispatchEvent(new CustomEvent("wa-admin", { detail: admin }));
+}
+
+async function adminClick() {
+  if (wa.admin) {
+    await api.adminLogout();
+    $("waDialog").close();
+    return setAdmin(false);
+  }
+  const d = $("loginDialog");
+  $("loginErr").hidden = true;
+  $("loginPw").value = "";
+  d.showModal();
+  $("loginPw").focus();
+  d.onclose = async () => {
+    if (d.returnValue !== "ok") return;
+    try {
+      await api.login($("loginPw").value);
+      toast("Sessão de administrador iniciada");
+      setAdmin(true);
+    } catch (e) {
+      toast(e.message, true);
+    }
+  };
+}
+
+export async function initWhatsApp({ onSynced }) {
+  onSyncedCb = onSynced;
+  $("adminBtn").onclick = adminClick;
+  setAdmin((await api.me().catch(() => ({}))).admin === true);
+  $("waPill").onclick = () => (wa.admin ? openDialog() : adminClick());
   $("syncBtn").onclick = () => api.sync().then(() => toast("A sincronizar…")).catch((e) => toast(e.message, true));
   $("waDialog").addEventListener("click", (e) => { if (e.target === $("waDialog")) $("waDialog").close(); });
 }
@@ -30,8 +71,11 @@ export function initWhatsApp({ onSynced }) {
 function render() {
   const s = wa.state;
   $("waPill").dataset.s = s.status;
-  $("waPillText").textContent = s.status === "ready" && s.me ? `Ligado · ${s.me}` : LABEL[s.status] || s.status;
-  $("syncBtn").hidden = s.status !== "ready";
+  $("waPill").title = wa.admin ? "" : "Entre como administrador para gerir o WhatsApp";
+  $("waPillText").textContent = wa.admin
+    ? (s.status === "ready" && s.me ? `Ligado · ${s.me}` : LABEL[s.status] || s.status)
+    : s.status === "ready" ? "WhatsApp ligado" : "WhatsApp offline";
+  $("syncBtn").hidden = !wa.admin || s.status !== "ready";
   $("syncBtn").disabled = s.sync.running;
 
   const bar = $("syncBar");
@@ -39,7 +83,7 @@ function render() {
   $("syncFill").style.width = s.sync.total ? `${(s.sync.done / s.sync.total) * 100}%` : "5%";
 
   // Auto-open the QR dialog the first time a code is available.
-  if (s.status === "qr" && !autoOpened) { autoOpened = true; openDialog(); }
+  if (wa.admin && s.status === "qr" && !autoOpened) { autoOpened = true; openDialog(); }
   if (s.status === "ready" && $("waDialog").open) renderDialog();
   if ($("waDialog").open) renderDialog();
   document.dispatchEvent(new CustomEvent("wa-state", { detail: s }));
