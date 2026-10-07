@@ -1,41 +1,9 @@
-# Ignore everything by default
-*
-!*/
-!.gitignore
-
-# Top-level source files
-!Makefile
-!README.md
-!go.mod
-!go.sum
-!main.go
-!geo.go
-!coords.go
-!parser.go
-!handlers_api.go
-!handlers_refresh.go
-!handlers_media.go
-!handlers_audit.go
-!handlers_send.go
-
-# Scripts
-!share.sh
-!backfill_media.sh
-
-# Directories and their contents
-!seed/
-!seed/**
-!web/
-!web/**
-!docs/
-!docs/**
-
-# Explicitly keep out these (belt and suspenders)
-listings.db
-listings.dev.db
-wacli.db
+node_modules/
+.wwebjs_auth/
+.wwebjs_cache/
 *.db
 *.db-journal
-*.db-wal
 *.db-shm
+*.db-wal
 .share_stage/
+.nfs*
