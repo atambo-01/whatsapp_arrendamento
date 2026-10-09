@@ -1,0 +1,202 @@
+[
+ {
+  "text": "Arrenda-se apartamento T3 no Talatona, 450 mil kz. Contacto 923 456 789",
+  "norm": "arrenda se apartamento t # no talatona # mil kz contacto # # #",
+  "p": {
+   "rental": 0.99911,
+   "noise": 0.00016,
+   "seeker": 0.00065,
+   "sale": 8e-05
+  }
+ },
+ {
+  "text": "🏠 ALUGA-SE\nApartamento T2 no Kilamba, bloco J\nRenda: 250.000 kz/mês\nCaução 3 meses\nContacto: 925 111 222",
+  "norm": "aluga se apartamento t # no kilamba bloco j renda # kz mes caucao # meses contacto # # #",
+  "p": {
+   "rental": 0.9996,
+   "noise": 0.00012,
+   "seeker": 0.00013,
+   "sale": 0.00015
+  }
+ },
+ {
+  "text": "Bom dia, arrendo casa T3 no Benfica com quintal, água e luz. 180 mil kwanzas. Ligar 912345678",
+  "norm": "bom dia arrendo casa t # no benfica com quintal agua e luz # mil kz ligar #",
+  "p": {
+   "rental": 0.99594,
+   "noise": 0.0,
+   "seeker": 0.00339,
+   "sale": 0.00067
+  }
+ },
+ {
+  "text": "Aluga-se vivenda V4 no Patriota, condomínio fechado, 700.000 kz. Interessados contactar 923000111",
+  "norm": "aluga se vivenda v # no patriota condominio fechado # kz interessados contactar #",
+  "p": {
+   "rental": 0.98638,
+   "noise": 0.0086,
+   "seeker": 0.00248,
+   "sale": 0.00254
+  }
+ },
+ {
+  "text": "Arrendo kitnet mobilada no Cazenga 60 mil por mês 944555666",
+  "norm": "arrendo kitnet mobilada no cazenga # mil por mes #",
+  "p": {
+   "rental": 0.99197,
+   "noise": 5e-05,
+   "seeker": 0.00784,
+   "sale": 0.00014
+  }
+ },
+ {
+  "text": "Disponível para arrendamento: T1 no Rangel, 90.000 kz, com casa de banho interna. Tratar 931222333",
+  "norm": "disponivel para arrendamento t # no rangel # kz com casa de banho interna tratar #",
+  "p": {
+   "rental": 0.99834,
+   "noise": 1e-05,
+   "seeker": 0.00128,
+   "sale": 0.00037
+  }
+ },
+ {
+  "text": "Aluga-se quarto na Maianga 40 mil kz, só para senhoras, 927888999",
+  "norm": "aluga se quarto na maianga # mil kz so para senhoras #",
+  "p": {
+   "rental": 0.99888,
+   "noise": 0.00032,
+   "seeker": 0.00074,
+   "sale": 6e-05
+  }
+ },
+ {
+  "text": "Alugo casa T2 no Zango 3, 80000kz, quintal grande. Ligue 933111444",
+  "norm": "alugo casa t # no zango # # kz quintal grande ligue #",
+  "p": {
+   "rental": 0.99429,
+   "noise": 0.00016,
+   "seeker": 0.003,
+   "sale": 0.00255
+  }
+ },
+ {
+  "text": "ARRENDA-SE\n📍 Viana, Estalagem\n🏡 Casa T3 nova\n💰 120.000 kz\n📞 923 777 888",
+  "norm": "arrenda se viana estalagem casa t # nova # kz # # #",
+  "p": {
+   "rental": 0.99937,
+   "noise": 0.00019,
+   "seeker": 0.00026,
+   "sale": 0.00018
+  }
+ },
+ {
+  "text": "Arrenda-se escritório no centro de Luanda, 80m2, 350 mil kz mensal. Contacto 222 333 444 / 923123123",
+  "norm": "arrenda se escritorio no centro de luanda # m # # mil kz mensal contacto # # # #",
+  "p": {
+   "rental": 0.98376,
+   "noise": 0.00154,
+   "seeker": 0.01447,
+   "sale": 0.00023
+  }
+ },
+ {
+  "text": "kasa t2 para alugar no kilamba 200 mil kz, cauçao 2 meses 923555666",
+  "norm": "casa t # para alugar no kilamba # mil kz caucao # meses #",
+  "p": {
+   "rental": 0.94431,
+   "noise": 0.00014,
+   "seeker": 0.05538,
+   "sale": 0.00017
+  }
+ },
+ {
+  "text": "Aluga se apartamento t3 no golf 2 com suite 500.000kz 912000999",
+  "norm": "aluga se apartamento t # no golf # com suite # kz #",
+  "p": {
+   "rental": 0.99928,
+   "noise": 0.0,
+   "seeker": 0.00043,
+   "sale": 0.0003
+  }
+ },
+ {
+  "text": "",
+  "norm": "",
+  "p": {
+   "rental": 0.00062,
+   "noise": 0.99845,
+   "seeker": 0.00031,
+   "sale": 0.00063
+  }
+ },
+ {
+  "text": "a",
+  "norm": "a",
+  "p": {
+   "rental": 0.00012,
+   "noise": 0.99901,
+   "seeker": 0.00014,
+   "sale": 0.00073
+  }
+ },
+ {
+  "text": "KASA T3!!! 25 MILHÕES",
+  "norm": "casa t # # milhao",
+  "p": {
+   "rental": 0.0001,
+   "noise": 6e-05,
+   "seeker": 8e-05,
+   "sale": 0.99975
+  }
+ },
+ {
+  "text": "v3ndo c4sa",
+  "norm": "vendo c # sa",
+  "p": {
+   "rental": 3e-05,
+   "noise": 0.92628,
+   "seeker": 1e-05,
+   "sale": 0.07368
+  }
+ },
+ {
+  "text": "aluga-se 🏠 t2 kilamba 200.000kz",
+  "norm": "aluga se t # kilamba # kz",
+  "p": {
+   "rental": 0.99973,
+   "noise": 0.00013,
+   "seeker": 0.00012,
+   "sale": 2e-05
+  }
+ },
+ {
+  "text": "ççç ãõ",
+  "norm": "c ao",
+  "p": {
+   "rental": 0.00059,
+   "noise": 0.99802,
+   "seeker": 0.00028,
+   "sale": 0.00111
+  }
+ },
+ {
+  "text": "casaaaa",
+  "norm": "casa",
+  "p": {
+   "rental": 0.005,
+   "noise": 0.98557,
+   "seeker": 0.00082,
+   "sale": 0.00861
+  }
+ },
+ {
+  "text": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+  "norm": "x",
+  "p": {
+   "rental": 0.00113,
+   "noise": 0.99735,
+   "seeker": 0.00055,
+   "sale": 0.00097
+  }
+ }
+]

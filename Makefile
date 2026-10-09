@@ -1,7 +1,7 @@
 ADMIN_PASSWORD ?= jinzo123
 export ADMIN_PASSWORD
 
-.PHONY: all run install dev demo test check-node proxy dep
+.PHONY: all run install dev demo test check-node proxy dep model
 
 all: run
 
@@ -49,3 +49,9 @@ proxy: check-node node_modules
 	trap 'kill $$WP 2>/dev/null' EXIT INT TERM; \
 	sleep 2; kill -0 $$WP 2>/dev/null || { echo "wireproxy falhou a arrancar"; exit 1; }; \
 	WA_PROXY=socks5://$(PROXY_ADDR) npm start
+
+# Re-treina o classificador (precisa de Python + scikit-learn) e exporta para JS
+model:
+	python3 -m pip install -q -r models/requirements.txt
+	cd models && python3 classificador_msg.py treinar
+	python3 models/export_js.py

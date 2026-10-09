@@ -9,3 +9,4 @@ node_modules/
 .nfs*
 .bin/
 wireproxy.conf
+__pycache__/

@@ -2,9 +2,10 @@ import { classByName, keywordClasses } from "./keywords.js";
 import { matchLocation } from "./location.js";
 import {
   HEAD_WORDS, rePhone, rePriceK, rePriceNum, reMedia, reRentalStrong, reRentalWeak,
-  reSaleStrong, reSeekerVerb, reSpam, reTypology,
+  reSaleStrong, reSeekerVerb, reSpam, reTypology, reURL,
 } from "./patterns.js";
 import { firstNWords } from "./text.js";
+import { modelAvailable, predict } from "./model.js";
 
 // A message is a listing only when it has (1) an intent (rent / sale / seek),
 // (2) a property reference and (3) enough concrete detail. Anything generic
@@ -33,7 +34,7 @@ function cleanHead(lower) {
 const firstIn = (toks, set) => toks.findIndex((t) => set.has(t));
 
 /** Category + reason + evidence score for the admin console. */
-export function classifyDetailed(text) {
+export function rulesDetailed(text) {
   const lower = cleanHead(text.toLowerCase());
   const head = firstNWords(lower, HEAD_WORDS);
   const headToks = tokens(head);
@@ -99,7 +100,36 @@ export function classifyDetailed(text) {
   return noise("Menciona imóvel mas sem intenção clara de arrendar, vender ou procurar", evidence);
 }
 
-export const classifyWhy = (text) => classifyDetailed(text);
+// Words that show a message is about a property (used as a final sanity gate).
+const propertyWords = new Set([...homeWords, ...["espaco", "galpao", "imovel", "imoveis", "habitacao", "residencia", "consultorio", "salas"]]);
+const mentionsProperty = (text) => reTypology.test(text) || tokens(text).some((w) => propertyWords.has(w));
+const wordCount = (text) => (text.replace(reURL, " ").match(/[\p{L}\p{N}]+/gu) || []).length;
+const pct = (x) => `${Math.round(x * 100)}%`;
+
+/**
+ * Final classifier = trained model (intent: rental/sale/seeker/noise, tolerant to
+ * typos and slang) + rule vetoes (non-property articles, no property mention, too
+ * short). Without model.json it falls back to the rules alone.
+ */
+export function classifyDetailed(text) {
+  const rules = rulesDetailed(text);
+  const m = modelAvailable() ? predict(text) : null;
+  if (!m) return rules;
+  const conf = pct(m.conf);
+  const noise = (reason) => ({ category: "noise", reason, score: m.conf });
+
+  if (m.label === "noise") {
+    const why = rules.category === "noise" ? ` (${rules.reason})` : "";
+    return noise(`Modelo: não é anúncio de imóvel, confiança ${conf}${why}`);
+  }
+  if (/outro tipo de artigo/.test(rules.reason)) return noise(rules.reason);
+  if (wordCount(text) < 3) return noise("Mensagem demasiado curta");
+  if (!mentionsProperty(text)) return noise("Sem referência a imóvel (casa, T2, apartamento, terreno…)");
+  const agree = rules.category === m.label ? " · confirmado pelas regras" : "";
+  return { category: m.label, reason: `Modelo: ${m.label}, confiança ${conf}${agree}`, score: m.conf };
+}
+
+export const classifyWhy = classifyDetailed;
 export const classify = (text) => classifyDetailed(text).category;
 
 /** Why a message was dropped as noise before classification (or "" if it wasn't). */

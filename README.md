@@ -66,3 +66,15 @@ Só o administrador pode ligar o WhatsApp (ver o QR), sincronizar, terminar a
 sessão e enviar mensagens. Define a palavra-passe com `ADMIN_PASSWORD`; se não
 estiver definida, é gerada uma aleatória e mostrada no arranque. O QR code nunca
 é enviado a visitantes. Clica em **Admin** no topo para entrar.
+
+## Classificador de mensagens
+Híbrido: um modelo treinado (TF-IDF + regressão logística, `models/`) decide a intenção
+(arrendar / vender / procurar / outro) e tolera erros de escrita; regras vetam o que não é
+imóvel (carros, telemóveis, serviços, conversa). Corre em JavaScript puro
+(`src/parser/model.js` + `model.json`), sem Python em produção.
+
+```bash
+npm test            # inclui os conjuntos de avaliação em test/eval/
+node test/eval/report.mjs -v        # métricas e erros (EVAL_SET=messages_b.json para o conjunto B)
+make model          # re-treina (precisa de Python + scikit-learn) e re-exporta o model.json
+```
