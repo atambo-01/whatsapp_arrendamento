@@ -58,7 +58,7 @@ class WhatsApp extends EventEmitter {
       this.client = null;
       this.#set({ status: "disconnected", me: null, error: String(reason) });
     });
-    client.on("message_create", (msg) => this.#ingest(msg).then((row) => row && upsert(row)).catch(() => {}));
+    client.on("message_create", (msg) => this.#ingest(msg).then((row) => row && upsert(row)).catch((e) => console.error("[wa] live message failed:", e?.message ?? e)));
 
     try {
       await client.initialize();
@@ -76,70 +76,86 @@ class WhatsApp extends EventEmitter {
     }
   }
 
-  async #ingest(msg, chat) {
+  // Live messages: normalise the whatsapp-web.js Message into a plain object.
+  async #ingest(msg) {
     const jid = msg.fromMe ? msg.to : msg.from;
     if (!jid?.endsWith("@g.us") || !msg.body) return null;
-    chat ??= await msg.getChat();
-    const senderJid = msg.author || msg.from;
-    return parseListing({
-      msgId: msg.id._serialized,
-      chatName: chat.name,
-      chatJid: jid,
-      timestamp: new Date(msg.timestamp * 1000).toISOString(),
-      sender: msg._data?.notifyName || "",
-      senderJid,
-      text: msg.body,
-      displayText: msg.hasQuotedMsg ? "" : "",
+    const chat = await msg.getChat();
+    return this.#toRow({
+      id: msg.id._serialized, chatJid: jid, chatName: chat.name, body: msg.body,
+      timestamp: msg.timestamp, sender: msg._data?.notifyName || "",
+      senderJid: msg.author || msg.from,
     });
   }
 
-  // getChats() builds every chat in one go and fails if a single one breaks,
-  // so fall back to loading the groups one by one.
+  #toRow(m) {
+    if (!m.body) return null;
+    return parseListing({
+      msgId: m.id,
+      chatName: m.chatName,
+      chatJid: m.chatJid,
+      timestamp: new Date(m.timestamp * 1000).toISOString(),
+      sender: m.sender || "",
+      senderJid: m.senderJid,
+      text: m.body,
+      displayText: "",
+    });
+  }
+
+  // Reads groups and their messages inside the WhatsApp Web page, avoiding
+  // whatsapp-web.js getChats()/getChatById(), which break on newer WA versions.
   async #groups() {
-    try {
-      return (await this.client.getChats()).filter((c) => c.isGroup);
-    } catch (e) {
-      console.error("[wa] getChats failed, loading groups one by one:", e?.message ?? e);
-    }
-    const ids = await this.client.pupPage.evaluate(() =>
+    return this.client.pupPage.evaluate(() =>
       window.require("WAWebCollections").Chat.getModelsArray()
-        .map((c) => c.id._serialized).filter((id) => id.endsWith("@g.us")));
-    console.log(`[wa] ${ids.length} group ids found`);
-    const chats = [];
-    for (const id of ids) {
-      const chat = await this.client.getChatById(id).catch((e) => {
-        console.error(`[wa] skipping ${id}:`, e?.message ?? e);
-        return null;
-      });
-      if (chat) chats.push(chat);
-    }
-    return chats;
+        .filter((c) => c.id._serialized.endsWith("@g.us"))
+        .map((c) => ({ jid: c.id._serialized, name: c.formattedTitle || c.name || c.id.user })));
+  }
+
+  async #fetchGroup(jid, limit) {
+    return this.client.pupPage.evaluate(async (jid, limit) => {
+      const id = (w) => (w ? w._serialized ?? String(w) : "");
+      const chat = window.require("WAWebCollections").Chat.get(jid);
+      if (!chat) return [];
+      const keep = (m) => !m.isNotification;
+      let msgs = chat.msgs.getModelsArray().filter(keep);
+      while (msgs.length < limit) {
+        const more = await window.require("WAWebChatLoadMessages").loadEarlierMsgs({ chat });
+        if (!more || !more.length) break;
+        msgs = [...more.filter(keep), ...msgs];
+      }
+      msgs.sort((a, b) => a.t - b.t);
+      return msgs.slice(-limit).map((m) => ({
+        id: id(m.id), body: m.body || "", timestamp: m.t,
+        sender: m.notifyName || "", senderJid: id(m.author) || id(m.from),
+      }));
+    }, jid, limit);
   }
 
   async sync(limit = config.syncLimit) {
     if (this.state.status !== "ready") throw new Error("WhatsApp não está ligado");
     if (this.state.sync.running) return;
-    const chats = await this.#groups();
+    // Right after "ready" the chat list may still be loading: wait for it.
+    let chats = await this.#groups();
+    for (let t = 0; !chats.length && t < 10; t++) {
+      await new Promise((r) => setTimeout(r, 3000));
+      chats = await this.#groups();
+    }
     console.log(`[wa] sync: ${chats.length} groups`);
     this.#set({ sync: { running: true, done: 0, total: chats.length, saved: 0, chat: "" } });
     let saved = 0;
     try {
       for (const [i, chat] of chats.entries()) {
         this.#set({ sync: { ...this.state.sync, chat: chat.name, done: i } });
-        const msgs = await chat.fetchMessages({ limit }).catch((e) => {
-          console.error(`[wa] fetchMessages failed for "${chat.name}":`, e.message);
+        const msgs = await this.#fetchGroup(chat.jid, limit).catch((e) => {
+          console.error(`[wa] "${chat.name}" failed:`, e?.message ?? e);
           return [];
         });
-        const rows = [];
-        for (const m of msgs) {
-          const row = await this.#ingest(m, chat).catch((e) => {
-            console.error("[wa] ingest failed:", e.message);
-            return null;
-          });
-          if (row) rows.push(row);
-        }
+        const rows = msgs
+          .map((m) => this.#toRow({ ...m, chatJid: chat.jid, chatName: chat.name }))
+          .filter(Boolean);
         upsertMany(rows);
         saved += rows.length;
+        console.log(`[wa] "${chat.name}": ${rows.length}/${msgs.length} messages`);
       }
     } finally {
       this.#set({ sync: { running: false, done: chats.length, total: chats.length, saved, chat: "" } });
