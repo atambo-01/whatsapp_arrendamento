@@ -9,6 +9,8 @@ const LABEL = {
   authenticated: "A autenticar…", ready: "Ligado", disconnected: "Desligado", error: "Erro",
 };
 let lastSyncRunning = false;
+let lastDone = -1;
+let refreshTimer;
 let autoOpened = false;
 
 let es;
@@ -20,11 +22,19 @@ function connectStream() {
   es.onmessage = (e) => {
     wa.state = JSON.parse(e.data);
     render();
-    if (lastSyncRunning && !wa.state.sync.running) {
+    const { running, done } = wa.state.sync;
+    if (running && done !== lastDone) { // show results progressively while syncing
+      lastDone = done;
+      clearTimeout(refreshTimer);
+      refreshTimer = setTimeout(() => onSyncedCb?.(), 800);
+    }
+    if (lastSyncRunning && !running) {
+      clearTimeout(refreshTimer);
       toast(`Sincronização concluída · ${wa.state.sync.saved} mensagens`);
       onSyncedCb?.();
     }
-    lastSyncRunning = wa.state.sync.running;
+    lastSyncRunning = running;
+    if (!running) lastDone = -1;
   };
 }
 

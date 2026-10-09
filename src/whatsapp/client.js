@@ -92,10 +92,16 @@ class WhatsApp extends EventEmitter {
     try {
       for (const [i, chat] of chats.entries()) {
         this.#set({ sync: { ...this.state.sync, chat: chat.name, done: i } });
-        const msgs = await chat.fetchMessages({ limit }).catch(() => []);
+        const msgs = await chat.fetchMessages({ limit }).catch((e) => {
+          console.error(`[wa] fetchMessages failed for "${chat.name}":`, e.message);
+          return [];
+        });
         const rows = [];
         for (const m of msgs) {
-          const row = await this.#ingest(m, chat).catch(() => null);
+          const row = await this.#ingest(m, chat).catch((e) => {
+            console.error("[wa] ingest failed:", e.message);
+            return null;
+          });
           if (row) rows.push(row);
         }
         upsertMany(rows);
