@@ -9,10 +9,12 @@ run: node_modules
 
 node_modules: package.json
 	npm install
+	npx puppeteer browsers install chrome
 	@touch node_modules
 
 install:
 	npm install
+	npx puppeteer browsers install chrome
 
 dev: node_modules
 	npm run dev
