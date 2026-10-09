@@ -62,7 +62,14 @@ class WhatsApp extends EventEmitter {
     } catch (e) {
       this.client = null;
       await client.destroy().catch(() => {});
-      this.#set({ status: "error", error: e.message });
+      const net = /timeout|ERR_(CONNECTION|NAME|INTERNET|TIMED)/i.test(e.message);
+      this.#set({
+        status: "error",
+        error: net
+          ? "Não foi possível chegar a web.whatsapp.com (tempo esgotado). Esta rede/máquina pode estar a bloquear o WhatsApp — tente noutra rede ou com VPN."
+          : e.message,
+      });
+      console.error("[wa] start failed:", e.message);
     }
   }
 
