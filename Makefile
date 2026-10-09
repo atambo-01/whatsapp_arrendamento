@@ -7,6 +7,9 @@ export ADMIN_PASSWORD
 check-node:
 	@node -e "const [a,b]=process.versions.node.split('.').map(Number); if (a<22||(a===22&&b<13)) { console.error('Node '+process.versions.node+' e demasiado antigo: precisa de >= 22.13'); process.exit(1) }"
 
+
+all: run
+
 # Instala dependências (se necessário) e arranca o servidor: make
 run: check-node node_modules
 	npm start
