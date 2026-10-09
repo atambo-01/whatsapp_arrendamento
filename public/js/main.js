@@ -2,9 +2,10 @@ import { api } from "./api.js";
 import { ago, debounce, esc, kz, toast, waLink } from "./format.js";
 import { bindGeosearch, clearRef, drawRadius, initMap, invalidate, setRef } from "./map.js";
 import { initWhatsApp, wa } from "./whatsapp.js";
+import { initConsole } from "./console.js";
 
 const $ = (id) => document.getElementById(id);
-const CATS = { rental: "Arrendamento", sale: "Venda", seeker: "Procura", noise: "Outros" };
+const CATS = { all: "Todos", rental: "Arrendamento", sale: "Venda", seeker: "Procura", noise: "Outros" };
 const TEMPLATES = [
   { name: "Tenho interesse", text: "Olá! Vi o seu anúncio e tenho interesse. Ainda está disponível?" },
   { name: "Pedir visita", text: "Boa tarde! Gostaria de agendar uma visita. Que dias e horas tem disponíveis?" },
@@ -14,7 +15,7 @@ const TEMPLATES = [
 
 // ---- State (mirrored in the URL so views are shareable) ----
 const state = {
-  category: "rental", q: "", typology: "", location: "", minPrice: "", maxPrice: "",
+  category: "all", q: "", typology: "", location: "", minPrice: "", maxPrice: "",
   onlyOk: false, sort: "timestamp|desc", page: 1, ref: null, radius: 0, map: false,
 };
 const KEYS = { category: "c", q: "q", typology: "t", location: "l", minPrice: "min", maxPrice: "max", sort: "s", page: "p" };
@@ -275,6 +276,7 @@ function syncInputs() {
 readUrl();
 syncInputs();
 bind();
+initConsole();
 initWhatsApp({ onSynced: () => loadMeta().then(() => load()) });
 await loadMeta();
 await load();

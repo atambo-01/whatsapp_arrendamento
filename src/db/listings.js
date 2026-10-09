@@ -27,8 +27,9 @@ export function upsertMany(rows) {
 export const upsert = (row) => upsertStmt.run(row);
 
 function buildWhere(f) {
-  const where = [BASE, "category = ?"];
-  const args = [f.category || "rental"];
+  const where = [BASE];
+  const args = [];
+  if (f.category !== "all") { where.push("category = ?"); args.push(f.category || "rental"); }
   if (f.typology) { where.push("typology = ?"); args.push(f.typology.toUpperCase()); }
   if (f.location) { where.push("location = ?"); args.push(f.location); }
   if (f.minPrice) { where.push("price >= ?"); args.push(f.minPrice); }
@@ -82,20 +83,39 @@ export const getListing = (id) =>
   db.prepare(`SELECT ${COLS.join(",")} FROM listings WHERE msg_id = ?`).get(id);
 
 export function counts() {
-  const out = { rental: 0, seeker: 0, sale: 0, noise: 0, total: 0 };
+  const out = { rental: 0, seeker: 0, sale: 0, noise: 0, total: 0, all: 0 };
   for (const r of db.prepare(`SELECT category c, COUNT(*) n FROM listings WHERE ${BASE} GROUP BY category`).all()) {
     out[r.c] = r.n;
     out.total += r.n;
   }
+  out.all = out.total;
   return out;
 }
 
 export function facets(category = "rental") {
   const pick = (col) =>
-    db.prepare(`SELECT ${col} v, COUNT(*) n FROM listings WHERE ${BASE} AND category = ? AND ${col} != '' GROUP BY ${col} ORDER BY n DESC LIMIT 40`)
-      .all(category).map((r) => r.v);
+    db.prepare(`SELECT ${col} v, COUNT(*) n FROM listings WHERE ${BASE} ${category === "all" ? "" : "AND category = ?"} AND ${col} != '' GROUP BY ${col} ORDER BY n DESC LIMIT 40`)
+      .all(...(category === "all" ? [] : [category])).map((r) => r.v);
   return { typologies: pick("typology"), locations: pick("location") };
 }
 
 export const lastTimestamp = () =>
   db.prepare("SELECT MAX(timestamp) t FROM listings").get().t || null;
+
+// ---- Admin console ----
+export const groupStats = () =>
+  db.prepare(`SELECT chat_jid, chat_name, COUNT(*) total, SUM(category != 'noise') ads, MAX(timestamp) last
+              FROM listings WHERE ${BASE} GROUP BY chat_jid ORDER BY last DESC`).all();
+
+export function queryMessages({ chatJid, category, q, page = 1, perPage = 50 }) {
+  const where = [BASE];
+  const args = [];
+  if (chatJid) { where.push("chat_jid = ?"); args.push(chatJid); }
+  if (category) { where.push("category = ?"); args.push(category); }
+  if (q) { where.push("raw_text LIKE ?"); args.push(`%${q}%`); }
+  const sql = "WHERE " + where.join(" AND ");
+  const total = db.prepare(`SELECT COUNT(*) n FROM listings ${sql}`).get(...args).n;
+  const rows = db.prepare(`SELECT msg_id, chat_name, chat_jid, timestamp, sender, raw_text, category FROM listings ${sql} ORDER BY timestamp DESC LIMIT ? OFFSET ?`)
+    .all(...args, perPage, (page - 1) * perPage);
+  return { rows, total, page, per_page: perPage };
+}

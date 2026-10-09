@@ -1,7 +1,8 @@
 import { Router } from "express";
 import {
-  counts, facets, getListing, lastTimestamp, queryListings, queryNearby,
+  counts, facets, getListing, groupStats, lastTimestamp, queryListings, queryMessages, queryNearby,
 } from "../db/listings.js";
+import { explain } from "../parser/index.js";
 import { isAdmin, requireAdmin } from "../auth.js";
 import { whatsapp } from "../whatsapp/client.js";
 
@@ -9,7 +10,7 @@ const int = (v, d = 0) => (Number.isFinite(parseInt(v, 10)) ? parseInt(v, 10) : 
 
 function filtersFrom(q) {
   return {
-    category: ["rental", "seeker", "sale", "noise"].includes(q.category) ? q.category : "rental",
+    category: ["all", "rental", "seeker", "sale", "noise"].includes(q.category) ? q.category : "rental",
     typology: q.typology || "",
     location: q.location || "",
     minPrice: int(q.min_price) || 0,
@@ -77,3 +78,20 @@ api.post("/send", requireAdmin, async (req, res) => {
     res.status(500).json({ ok: false, error: e.message });
   }
 });
+
+// ---- Admin console: every stored message, with the reason for its category ----
+api.get("/console/groups", requireAdmin, (_req, res) => res.json(groupStats()));
+
+api.get("/console/messages", requireAdmin, (req, res) => {
+  const out = queryMessages({
+    chatJid: req.query.chat_jid || "",
+    category: ["rental", "seeker", "sale", "noise"].includes(req.query.category) ? req.query.category : "",
+    q: (req.query.q || "").trim(),
+    page: Math.max(1, int(req.query.page, 1)),
+    perPage: 50,
+  });
+  out.rows = out.rows.map((r) => ({ ...r, reason: explain(r.raw_text) }));
+  res.json(out);
+});
+
+api.get("/console/log", requireAdmin, (_req, res) => res.json({ lines: whatsapp.logs() }));

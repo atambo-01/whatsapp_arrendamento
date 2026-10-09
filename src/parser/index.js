@@ -1,4 +1,4 @@
-import { classify, isNoise } from "./classify.js";
+import { classify, classifyWhy, isNoise, noiseReason } from "./classify.js";
 import { extractLocationRaw, matchLocation } from "./location.js";
 import {
   TYPOLOGY_HEAD_WORDS, rePhone, reTypology, reTypologyGeneric, reURL,
@@ -62,4 +62,10 @@ export function parseListing({
   }
   l.price_ok = priceInRange(l.category, l.price);
   return l;
+}
+
+/** Explains (pt) how a raw message was classified. */
+export function explain(text) {
+  const clean = text.replace(reURL, " ").trim() || text;
+  return noiseReason(clean) || classifyWhy(clean).reason;
 }

@@ -16,6 +16,7 @@ class WhatsApp extends EventEmitter {
   constructor() {
     super();
     this.client = null;
+    this.logBuf = [];
     this.state = {
       status: config.waDisabled ? "disabled" : "idle",
       qr: null, me: null, error: null,
@@ -24,6 +25,15 @@ class WhatsApp extends EventEmitter {
   }
 
   snapshot() { return this.state; }
+
+  logs() { return this.logBuf; }
+
+  // Console lines shown to the admin (and echoed to the terminal).
+  #log(line, isError = false) {
+    (isError ? console.error : console.log)(line);
+    this.logBuf.push({ t: new Date().toISOString(), line, error: isError });
+    if (this.logBuf.length > 300) this.logBuf.shift();
+  }
 
   #set(patch) {
     this.state = { ...this.state, ...patch };
@@ -52,7 +62,7 @@ class WhatsApp extends EventEmitter {
     client.on("auth_failure", (m) => this.#set({ status: "error", error: `Falha de autenticação: ${m}` }));
     client.on("ready", () => {
       this.#set({ status: "ready", qr: null, me: client.info?.pushname || client.info?.wid?.user || null });
-      this.sync().catch((e) => console.error("[wa] initial sync failed:", e.stack || e.message));
+      this.sync().catch((e) => this.#log(`[wa] sincronização falhou: ${e.message}`, true));
     });
     client.on("disconnected", (reason) => {
       this.client = null;
@@ -72,7 +82,7 @@ class WhatsApp extends EventEmitter {
           ? "Não foi possível chegar a web.whatsapp.com (tempo esgotado). Esta rede/máquina pode estar a bloquear o WhatsApp — tente noutra rede ou com VPN."
           : e.message,
       });
-      console.error("[wa] start failed:", e.message);
+      this.#log(`[wa] arranque falhou: ${e.message}`, true);
     }
   }
 
@@ -140,14 +150,14 @@ class WhatsApp extends EventEmitter {
       await new Promise((r) => setTimeout(r, 3000));
       chats = await this.#groups();
     }
-    console.log(`[wa] sync: ${chats.length} groups`);
+    this.#log(`[wa] sync: ${chats.length} grupos`);
     this.#set({ sync: { running: true, done: 0, total: chats.length, saved: 0, chat: "" } });
     let saved = 0;
     try {
       for (const [i, chat] of chats.entries()) {
         this.#set({ sync: { ...this.state.sync, chat: chat.name, done: i } });
         const msgs = await this.#fetchGroup(chat.jid, limit).catch((e) => {
-          console.error(`[wa] "${chat.name}" failed:`, e?.message ?? e);
+          this.#log(`[wa] "${chat.name}" falhou: ${e?.message ?? e}`, true);
           return [];
         });
         const rows = msgs
@@ -155,7 +165,8 @@ class WhatsApp extends EventEmitter {
           .filter(Boolean);
         upsertMany(rows);
         saved += rows.length;
-        console.log(`[wa] "${chat.name}": ${rows.length}/${msgs.length} messages`);
+        const noText = msgs.filter((m) => !m.body).length;
+        this.#log(`[wa] "${chat.name}": ${rows.length} guardadas de ${msgs.length} (${noText} sem texto: imagens, stickers, áudio…)`);
       }
     } finally {
       this.#set({ sync: { running: false, done: chats.length, total: chats.length, saved, chat: "" } });
