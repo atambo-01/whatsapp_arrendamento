@@ -547,3 +547,94 @@ tr:hover { background: var(--bg-hover); }
 .page-total {
   color: var(--text-muted);
 }
+
+/* ---------- Export PDF dialog ---------- */
+.export-summary {
+  font-size: 13px;
+  color: var(--text);
+  margin-bottom: 14px;
+  padding: 10px 12px;
+  background: var(--bg-subtle);
+  border: 1px solid var(--border-soft);
+  border-radius: 6px;
+  word-break: break-word;
+}
+
+.export-option {
+  margin-bottom: 16px;
+}
+
+.export-label {
+  display: block;
+  font-size: 12px;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin-bottom: 6px;
+}
+
+.export-radios {
+  display: flex;
+  gap: 16px;
+  font-size: 14px;
+  color: var(--text);
+}
+
+.export-radios label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+}
+
+.export-hint {
+  font-size: 11px;
+  color: var(--text-faint);
+  margin-top: 6px;
+}
+
+.export-progress {
+  margin-bottom: 14px;
+}
+
+.export-phase {
+  font-size: 13px;
+  color: var(--text-muted);
+  margin-bottom: 6px;
+}
+
+.export-progress .bar {
+  background: var(--border-soft);
+  height: 8px;
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.export-progress .bar-fill {
+  background: var(--accent);
+  height: 100%;
+  width: 0%;
+  transition: width 0.15s;
+}
+
+/* Selection checkbox column in the table */
+th.col-select,
+td.col-select {
+  text-align: center;
+  padding-left: 6px;
+  padding-right: 6px;
+}
+
+th.col-select input,
+td.col-select input {
+  margin: 0;
+  cursor: pointer;
+}
+
+tr.selected {
+  background: var(--accent-soft);
+}
+
+[data-theme="dark"] tr.selected {
+  background: var(--accent-soft);
+}

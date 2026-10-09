@@ -57,6 +57,7 @@
     <option value="chat_name|asc">Source A–Z</option>
   </select>
   <button id="mapToggle" onclick="toggleMap()">🗺️ Map</button>
+  <button id="exportPdfBtn" onclick="openExportDialog()">📄 Guardar PDF</button>
 </div>
 
 <div id="mapWrap">
@@ -102,7 +103,46 @@
   </div>
 </div>
 
+<div class="send-dialog" id="exportDialog">
+  <div class="send-panel">
+    <div class="send-header">
+      <span class="send-title">Guardar PDF</span>
+      <button class="send-close" id="exportCloseBtn">×</button>
+    </div>
+
+    <div class="export-summary" id="exportSummary">
+      A preparar…
+    </div>
+
+    <div class="export-option">
+      <label class="export-label">Fotos por anúncio</label>
+      <div class="export-radios">
+        <label>
+          <input type="radio" name="photoLimit" value="3" checked>
+          3 fotos
+        </label>
+        <label>
+          <input type="radio" name="photoLimit" value="all">
+          Todas as fotos
+        </label>
+      </div>
+      <div class="export-hint">Todas as fotos demora mais tempo e gera um ficheiro maior.</div>
+    </div>
+
+    <div class="export-progress" id="exportProgress" style="display:none">
+      <div class="export-phase" id="exportPhase">A obter dados…</div>
+      <div class="bar"><div class="bar-fill" id="exportBarFill"></div></div>
+    </div>
+
+    <div class="send-actions">
+      <button class="send-cancel" id="exportCancelBtn">Cancelar</button>
+      <button class="send-submit" id="exportStartBtn">Guardar PDF</button>
+    </div>
+  </div>
+</div>
+
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="/vendor/jspdf.umd.min.js"></script>
 <script src="/ui-state.js"></script>
 <script src="/resize.js"></script>
 <script src="/map.js"></script>

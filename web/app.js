@@ -56,6 +56,7 @@ function setCat(cat) {
   currentPage = 1;
   document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.cat === cat));
   uiStateSave({ currentCat: cat, currentPage: 1 });
+  selectionClear();
   load();
 }
 
@@ -70,6 +71,7 @@ function setSort(col) {
   currentPage = 1;
   syncDropdown();
   uiStateSave({ sortCol: sortCol, sortDir: sortDir, currentPage: 1 });
+  selectionClear();
   load();
 }
 
@@ -92,6 +94,7 @@ function onDropdownChange() {
   sortDir = parts[1];
   currentPage = 1;
   uiStateSave({ sortCol: sortCol, sortDir: sortDir, currentPage: 1 });
+  selectionClear();
   load();
 }
 
@@ -269,6 +272,7 @@ async function refresh() {
   loadColumnWidths();
   wireGeoSearch();
   initLightbox();
+  wireExportDialog();
 
   const saved = uiStateApplyToGlobals();
   uiStateRestoreInputs();

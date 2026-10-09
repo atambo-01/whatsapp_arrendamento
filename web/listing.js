@@ -19,6 +19,10 @@
   var navList = [];
   var navIndex = -1;
 
+  // Single-listing export: when set, openExportDialog() uses this instead of
+  // the selection / filter path.
+  window.__exportSingleListing = null;
+
   function loadNavList() {
     try {
       var raw = sessionStorage.getItem('navList');
@@ -90,6 +94,9 @@
   }
 
   function render(data) {
+    // Stash the full listing so the export dialog can use it.
+    window.__exportSingleListing = data;
+
     var topPrice = fmtPriceTop(data.price, data.price_ok);
     var priceHtml;
     if (topPrice) {
@@ -97,7 +104,6 @@
     } else {
       priceHtml = '<div class="price-banner no-price">Preço não reconhecido</div>';
     }
-    // Raw price string below, always shown when present, muted.
     if (data.price_text && data.price_text.trim() !== '') {
       priceHtml += '<div class="price-raw">' + esc(data.price_text.trim()) + '</div>';
     }
@@ -155,6 +161,7 @@
         '<div class="actions">' +
           '<a class="btn primary" href="/">Voltar à lista</a>' +
           '<button class="btn send-action" onclick="openSendDialog(\'' + sendJid + '\',\'' + sendLabel + '\',\'' + esc(data.msg_id) + '\',\'' + sendChat + '\')">Enviar mensagem</button>' +
+          '<button class="btn" onclick="openExportDialog()">📄 Guardar PDF</button>' +
         '</div>' +
       '</div>' +
 
@@ -209,10 +216,30 @@
       '<div class="actions"><a class="btn primary" href="/">Voltar à lista</a></div></div>';
   }
 
+  // Override the export path so the dialog knows this is a single listing.
+  // export.js checks window.__exportSingleListing before falling back to
+  // selection or the current filter.
+  function patchExportForSingle() {
+    var origResolve = window.resolveListingIds;
+    if (typeof origResolve !== 'function') return;
+    window.resolveListingIds = async function () {
+      var l = window.__exportSingleListing;
+      if (l && l.msg_id) return [l.msg_id];
+      return origResolve();
+    };
+    // Pre-populate the listing cache so fetchListings doesn't refetch it.
+    if (window.__exportSingleListing && window.__exportSingleListing.msg_id) {
+      var l = window.__exportSingleListing;
+      window.__exportListingCache = window.__exportListingCache || {};
+      window.__exportListingCache[l.msg_id] = l;
+    }
+  }
+
   themeInit();
   loadNavList();
   wireNav();
   initSendDialog();
+  if (typeof wireExportDialog === 'function') wireExportDialog();
 
   if (!msgId) {
     showError('ID em falta no URL.');
@@ -225,7 +252,10 @@
       if (!r.ok) throw new Error('Erro ' + r.status);
       return r.json();
     })
-    .then(render)
+    .then(function (data) {
+      render(data);
+      patchExportForSingle();
+    })
     .catch(function (err) {
       showError(err.message || 'Falha ao carregar.');
     });

@@ -13,7 +13,7 @@ import (
 )
 
 const defaultPerPage = 50
-const maxPerPage = 500
+const maxPerPage = 5000
 
 // Base filter applied to every listings query.
 const baseListingsFilter = "category = ? AND chat_jid LIKE '%@g.us' AND raw_text IS NOT NULL AND TRIM(raw_text) != ''"
