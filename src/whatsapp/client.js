@@ -135,7 +135,8 @@ class WhatsApp extends EventEmitter {
       }
       msgs.sort((a, b) => a.t - b.t);
       return msgs.slice(-limit).map((m) => ({
-        id: id(m.id), body: m.body || "", timestamp: m.t,
+        // For media, the raw model's body is a base64 thumbnail: use the caption (same rule as whatsapp-web.js).
+        id: id(m.id), body: (m.directPath ? m.caption : m.body || m.pollName || m.eventName) || "", timestamp: m.t,
         sender: m.notifyName || "", senderJid: id(m.author) || id(m.from),
       }));
     }, jid, limit);
