@@ -1,7 +1,7 @@
 ADMIN_PASSWORD ?= jinzo123
 export ADMIN_PASSWORD
 
-.PHONY: all run install dev demo test check-node
+.PHONY: all run install dev demo test check-node proxy dep
 
 all: run
 
@@ -33,3 +33,19 @@ demo: check-node node_modules
 
 test:
 	npm test
+
+# Arranca o wireproxy (WireGuard -> SOCKS5 local) e o servidor a usá-lo, sem VPN
+# no sistema. Precisa de um wireproxy.conf (ver wireproxy.conf.example).
+WIREPROXY_URL ?= https://github.com/windtf/wireproxy/releases/latest/download/wireproxy_linux_amd64.tar.gz
+PROXY_ADDR ?= 127.0.0.1:25344
+
+# Instala e configura tudo: npm, Chrome, wireproxy e a config WireGuard (WARP)
+dep: install
+	WIREPROXY_URL=$(WIREPROXY_URL) ./scripts/setup-proxy.sh
+
+proxy: check-node node_modules
+	@test -x .bin/wireproxy -a -f wireproxy.conf || ./scripts/setup-proxy.sh
+	@.bin/wireproxy -c wireproxy.conf & WP=$$!; \
+	trap 'kill $$WP 2>/dev/null' EXIT INT TERM; \
+	sleep 2; kill -0 $$WP 2>/dev/null || { echo "wireproxy falhou a arrancar"; exit 1; }; \
+	WA_PROXY=socks5://$(PROXY_ADDR) npm start

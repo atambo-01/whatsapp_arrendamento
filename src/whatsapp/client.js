@@ -39,7 +39,10 @@ class WhatsApp extends EventEmitter {
       puppeteer: {
         headless: true,
         executablePath: config.chromePath,
-        args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage"],
+        args: [
+          "--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage",
+          ...(config.proxy ? [`--proxy-server=${config.proxy}`] : []),
+        ],
       },
     });
     this.client = client;
@@ -49,7 +52,7 @@ class WhatsApp extends EventEmitter {
     client.on("auth_failure", (m) => this.#set({ status: "error", error: `Falha de autenticação: ${m}` }));
     client.on("ready", () => {
       this.#set({ status: "ready", qr: null, me: client.info?.pushname || client.info?.wid?.user || null });
-      this.sync().catch((e) => console.error("[wa] initial sync failed:", e.message));
+      this.sync().catch((e) => console.error("[wa] initial sync failed:", e.stack || e.message));
     });
     client.on("disconnected", (reason) => {
       this.client = null;
@@ -90,10 +93,34 @@ class WhatsApp extends EventEmitter {
     });
   }
 
+  // getChats() builds every chat in one go and fails if a single one breaks,
+  // so fall back to loading the groups one by one.
+  async #groups() {
+    try {
+      return (await this.client.getChats()).filter((c) => c.isGroup);
+    } catch (e) {
+      console.error("[wa] getChats failed, loading groups one by one:", e?.message ?? e);
+    }
+    const ids = await this.client.pupPage.evaluate(() =>
+      window.require("WAWebCollections").Chat.getModelsArray()
+        .map((c) => c.id._serialized).filter((id) => id.endsWith("@g.us")));
+    console.log(`[wa] ${ids.length} group ids found`);
+    const chats = [];
+    for (const id of ids) {
+      const chat = await this.client.getChatById(id).catch((e) => {
+        console.error(`[wa] skipping ${id}:`, e?.message ?? e);
+        return null;
+      });
+      if (chat) chats.push(chat);
+    }
+    return chats;
+  }
+
   async sync(limit = config.syncLimit) {
     if (this.state.status !== "ready") throw new Error("WhatsApp não está ligado");
     if (this.state.sync.running) return;
-    const chats = (await this.client.getChats()).filter((c) => c.isGroup);
+    const chats = await this.#groups();
+    console.log(`[wa] sync: ${chats.length} groups`);
     this.#set({ sync: { running: true, done: 0, total: chats.length, saved: 0, chat: "" } });
     let saved = 0;
     try {

@@ -15,5 +15,7 @@ export const config = {
   // Admin password (ADMIN_PASSWORD). If unset, a random one is printed at startup.
   adminPassword: process.env.ADMIN_PASSWORD || "",
   adminSecret: process.env.ADMIN_SECRET || "",
+  // SOCKS5/HTTP proxy for Chrome (e.g. socks5://127.0.0.1:25344 from `make proxy`).
+  proxy: process.env.WA_PROXY || "",
   chromePath: process.env.PUPPETEER_EXECUTABLE_PATH || undefined,
 };

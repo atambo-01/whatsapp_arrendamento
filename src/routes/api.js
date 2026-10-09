@@ -62,7 +62,7 @@ api.get("/whatsapp/events", (req, res) => {
 api.post("/whatsapp/connect", requireAdmin, (_req, res) => { whatsapp.start(); res.json({ ok: true }); });
 api.post("/whatsapp/sync", requireAdmin, (_req, res) => {
   if (whatsapp.snapshot().status !== "ready") return res.status(409).json({ ok: false, error: "WhatsApp não está ligado" });
-  whatsapp.sync().catch((e) => console.error("[wa] sync failed:", e.message));
+  whatsapp.sync().catch((e) => console.error("[wa] sync failed:", e.stack || e.message));
   res.json({ ok: true });
 });
 api.post("/whatsapp/logout", requireAdmin, async (_req, res) => { await whatsapp.logout(); res.json({ ok: true }); });

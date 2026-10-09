@@ -1,0 +1,14 @@
+# Copia para wireproxy.conf (ignorado pelo git) e preenche com uma config
+# WireGuard tua (ex.: Cloudflare WARP via `wgcf`, ProtonVPN, Mullvad...).
+[Interface]
+Address = 172.16.0.2/32
+PrivateKey = <a_tua_chave_privada>
+DNS = 1.1.1.1
+
+[Peer]
+PublicKey = <chave_publica_do_servidor>
+Endpoint = <host>:<porta>
+AllowedIPs = 0.0.0.0/0
+
+[Socks5]
+BindAddress = 127.0.0.1:25344

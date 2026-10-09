@@ -7,3 +7,5 @@ node_modules/
 *.db-wal
 .share_stage/
 .nfs*
+.bin/
+wireproxy.conf
