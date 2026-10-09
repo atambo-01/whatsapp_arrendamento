@@ -18,3 +18,27 @@ test("sale price in millions", () => {
   assert.equal(l.category, "sale");
   assert.equal(l.price, 85000000);
 });
+
+// ---- Generic / off-topic messages must not become listings ----
+const noise = [
+  "Alguém tem casa?",
+  "Preciso de uma casa",
+  "Quem sabe de um canalizador?",
+  "Vendo bolos e salgados, encomendas 923000111",
+  "Bom dia a todos, feliz semana!",
+  "Vendo sofá para casa nova 50 mil",
+  "O aluguer está caríssimo este mês",
+  "Quero uma pizza",
+  "Aluga-se casa",
+  "Pessoal, a minha casa foi arrombada ontem, cuidado com os ladrões na zona",
+];
+for (const t of noise) test(`noise: ${t}`, () => assert.equal(parse(t).category, "noise"));
+
+test("greeting before a rental ad", () =>
+  assert.equal(parse("Bom dia! Aluga-se casa T2 no Kilamba, renda 250.000 kz, 923111222").category, "rental"));
+test("rental without intent word but complete", () =>
+  assert.equal(parse("T2 no Zango, 120000kz, ligar 912345678").category, "rental"));
+test("seeker with details", () =>
+  assert.equal(parse("Bom dia, preciso de um quarto na zona do Talatona até 80 mil").category, "seeker"));
+test("sale of land", () =>
+  assert.equal(parse("Vende-se terreno 20x30 no Dombe Grande, 5 milhões, 923000111").category, "sale"));
