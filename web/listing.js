@@ -131,7 +131,10 @@
     }
 
     var phoneVal = data.phone ? esc(data.phone) : '';
-    var publishedVal = esc(fmtDate(data.timestamp));
+    var publishedVal =
+      '<span data-ts="' + esc(data.timestamp || '') + '" title="' + esc(fmtDate(data.timestamp)) + '">' +
+        esc(data.timestamp ? formatRelativeTime(data.timestamp) : '—') +
+          '</span>';
     var groupVal = data.chat_name ? esc(data.chat_name) : '';
     var authorVal = data.sender ? esc(data.sender) : '';
 

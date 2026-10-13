@@ -57,7 +57,7 @@ function renderTable(data, opts) {
 
   for (let i = 0; i < rows.length; i++) {
     const r = rows[i];
-    const date = r.timestamp ? r.timestamp.slice(0, 10) : '';
+    const relTime = r.timestamp ? formatRelativeTime(r.timestamp) : '';
     const price = r.price
       ? r.price.toLocaleString('pt-AO') + ' Kz'
       : (r.price_text || '—');
@@ -91,7 +91,7 @@ function renderTable(data, opts) {
       '<td class="price">' + esc(price) + '</td>' +
       '<td>' + locCell + '</td>' +
       '<td>' + esc(r.phone) + '</td>' +
-      '<td>' + esc(date) + '</td>' +
+      '<td data-ts="' + esc(r.timestamp || '') + '" title="' + esc(r.timestamp || '') + '">' + esc(relTime) + '</td>' +
       '<td>' + esc(r.chat_name) + '</td>' +
       '<td class="actions">' +
         '<a class="copy-btn open-btn" href="' + detailUrl + '">Open</a>' +
